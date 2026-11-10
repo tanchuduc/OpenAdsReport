@@ -339,11 +339,6 @@ api.post("/api/sync", async (c) => {
     timestamp: c.req.header("X-Queue-Timestamp") ?? null,
     keyId: c.req.header("X-Queue-Key-Id") ?? null,
   }).catch(() => false);
-
-  if (!signed && !maySpendQuota(c)) {
-    return c.json({ error: "Sign in to run a sync." }, 403);
-  }
-
   // One sync at a time. `sync_runs` already records a run's status; without
   // reading it, repeated "Sync now" clicks each start their own full pull and
   // put read volume straight back on the user's click rate — the exact thing
