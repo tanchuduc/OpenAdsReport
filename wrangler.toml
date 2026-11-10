@@ -13,5 +13,8 @@ binding = "DB"
 database_name = "openadsreport-db"
 database_id = "ced50cd5-cabb-4e21-823c-fe0b4080f18b"
 
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 METAADS_BEARER_TOKEN = "EAAOhgsUSolIBS6ke3vNsxPjH2K4peyf4Mm2THErTUcRQxCw6pJhQl5mGQy3Vy8oQjQvohIXLrb5FRHesEfZAoLUDWiZCIzX5VsvVOWCAPks2RjLraLbr3szthrMHCJVoMwoe1erU3ZAG6SZBxLYXXyPcYKamZAW4JpvOVBzTZAZBaeIpqTfTqzrxiQ1ClAJLZB0CxwZDZD"

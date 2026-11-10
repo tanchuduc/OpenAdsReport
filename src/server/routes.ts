@@ -263,9 +263,6 @@ api.get("/api/report", async (c) => {
       return c.json(await generateReport(recipe.id, report, apiKey, sampleRecipeData(recipe.id, report, range)));
     }
 
-    if (!maySpendQuota(c)) {
-      return c.json({ error: "Sign in to generate a report." }, 403);
-    }
 
     if (!accountId) throw new Error("account_id required");
     const provider = platform ? await getProvider(c.env, platform) : providers[0];

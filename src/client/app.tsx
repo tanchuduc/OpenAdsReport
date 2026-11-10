@@ -84,20 +84,43 @@ const BAD = "#B91C1C";
 
 // ── Formatters ───────────────────────────────────────────────────────────────
 
-const money = (n: number, cur = "USD") =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: cur, minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
-const moneyK = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(1)}`);
-const num = (n: number) => new Intl.NumberFormat("en-US").format(Math.round(n));
+const money = (n: number, cur = "VND") => {
+  if (cur === "VND" || cur === "VNĐ") {
+    return new Intl.NumberFormat("vi-VN", {
+      style: "currency",
+      currency: "VND",
+      maximumFractionDigits: 0,
+    }).format(Math.round(n));
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: cur,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  }).format(n);
+};
+
+const moneyK = (n: number, cur = "VND") => {
+  if (cur === "VND" || cur === "VNĐ") {
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} Tỷ ₫`;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} Tr ₫`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K ₫`;
+    return `${Math.round(n)} ₫`;
+  }
+  return n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(1)}`;
+};
+
+const num = (n: number) => new Intl.NumberFormat("vi-VN").format(Math.round(n));
 const pct = (n: number) => `${n.toFixed(1)}%`;
 const x = (n: number) => `${n.toFixed(1)}x`;
 
 function fmtDay(d: string) {
   const dt = new Date(d + "T00:00:00");
-  return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}`;
+  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
 }
 function fmtRange(since: string, until: string) {
-  const o: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  return `${new Date(since + "T00:00:00").toLocaleDateString("en-US", o)} - ${new Date(until + "T00:00:00").toLocaleDateString("en-US", o)}`;
+  const o: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric" };
+  return `${new Date(since + "T00:00:00").toLocaleDateString("vi-VN", o)} - ${new Date(until + "T00:00:00").toLocaleDateString("vi-VN", o)}`;
 }
 function perfColor(roas: number) {
   return roas >= 2.5 ? GOOD : roas >= 1 ? "#B45309" : BAD;
@@ -182,15 +205,15 @@ type Freshness = {
 };
 
 function sinceLabel(iso: string | null): string {
-  if (!iso) return "never";
+  if (!iso) return "chưa từng";
   const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
   const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (mins < 2) return "just now";
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 2) return "vừa xong";
+  if (mins < 60) return `${mins} phút trước`;
   const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  if (hrs < 24) return `${hrs} giờ trước`;
   const days = Math.round(hrs / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  return `${days} ngày trước`;
 }
 
 function SyncBar({ freshness, needsSync, syncing, onSync }: {
@@ -199,11 +222,11 @@ function SyncBar({ freshness, needsSync, syncing, onSync }: {
   if (needsSync) {
     return (
       <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 rounded-[6px] ${C.card} text-[13px] ${C.text} mb-4 no-print`}>
-        <span><span className="font-semibold">Connected, not yet synced.</span> The first sync is booked and the dashboard fills in when it lands — or pull your history now.</span>
+        <span><span className="font-semibold">Đã kết nối, chưa đồng bộ dữ liệu.</span> Dữ liệu sẽ tự động hiển thị sau lần đồng bộ đầu tiên — hoặc bấm để đồng bộ lịch sử ngay.</span>
         <button onClick={onSync} disabled={syncing}
           className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-medium bg-[#DD5164] text-white hover:bg-[#C53A4E] transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-          {syncing ? "Syncing…" : "Run first sync"}
+          {syncing ? "Đang đồng bộ…" : "Đồng bộ lần đầu"}
         </button>
       </div>
     );
@@ -215,14 +238,14 @@ function SyncBar({ freshness, needsSync, syncing, onSync }: {
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 rounded-[6px] border border-[#F59E0B]/40 bg-[#FFFBEB] text-[13px] text-[#78350F] mb-4 no-print">
         <span>
-          <span className="font-semibold">These numbers have stopped updating.</span>{" "}
-          Data runs through {freshness.throughDate}, {freshness.daysBehind} days behind. Last sync {sinceLabel(freshness.lastSyncAt)}
+          <span className="font-semibold">Dữ liệu đã ngừng cập nhật.</span>{" "}
+          Dữ liệu đến ngày {freshness.throughDate}, trễ {freshness.daysBehind} ngày. Đồng bộ lần cuối: {sinceLabel(freshness.lastSyncAt)}
           {freshness.status && freshness.status !== "ok" ? ` (${freshness.status}${freshness.error ? `: ${freshness.error}` : ""})` : ""}.
         </span>
         <button onClick={onSync} disabled={syncing}
           className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-medium bg-[#DD5164] text-white hover:bg-[#C53A4E] transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-          {syncing ? "Syncing…" : "Sync now"}
+          {syncing ? "Đang đồng bộ…" : "Đồng bộ ngay"}
         </button>
       </div>
     );
@@ -230,15 +253,15 @@ function SyncBar({ freshness, needsSync, syncing, onSync }: {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[#64748B] mb-4 no-print">
       <span className="tnum">
-        Synced {sinceLabel(freshness.lastSyncAt)}
-        {freshness.throughDate ? ` · data through ${freshness.throughDate}` : ""}
+        Đã đồng bộ {sinceLabel(freshness.lastSyncAt)}
+        {freshness.throughDate ? ` · Dữ liệu đến ${freshness.throughDate}` : ""}
       </span>
       {freshness.status && freshness.status !== "ok" && (
-        <span className="text-[#B45309]" title={freshness.error ?? undefined}>· last sync {freshness.status}</span>
+        <span className="text-[#B45309]" title={freshness.error ?? undefined}>· lần đồng bộ gần nhất: {freshness.status}</span>
       )}
       <button onClick={onSync} disabled={syncing}
         className="underline underline-offset-2 hover:text-[#1A202C] disabled:opacity-50">
-        {syncing ? "syncing…" : "sync now"}
+        {syncing ? "đang đồng bộ…" : "đồng bộ ngay"}
       </button>
     </div>
   );
@@ -247,8 +270,8 @@ function SyncBar({ freshness, needsSync, syncing, onSync }: {
 function PreviewBanner() {
   return (
     <div className={`px-4 py-3 rounded-[6px] ${C.card} text-[13px] ${C.text}`}>
-      <span className="font-semibold">Just a preview.</span> These are sample numbers so you can see how the dashboard works.
-      Your real numbers will show up here once you connect an ads account.
+      <span className="font-semibold">Bản xem trước dữ liệu mẫu.</span> Đây là các số liệu mẫu để bạn hình dung trực quan cách bảng điều khiển hoạt động.
+      Dữ liệu thực tế của bạn sẽ tự động hiển thị tại đây sau khi bạn kết nối tài khoản quảng cáo.
     </div>
   );
 }
@@ -349,11 +372,11 @@ function ChannelTable({ channels }: { channels: { platform: Platform; metrics: M
     <div className={`${C.card} ${C.shadow} rounded-[6px] overflow-x-auto`}>
       <div className="px-3 sm:px-4 min-w-[500px]">
         <div className="grid grid-cols-5 gap-2 py-2 border-b border-[#E2E8F0] items-center">
-          <div className={C.label}>Channel</div>
-          <div className={`${C.label} text-right`}>Ad Spend</div>
+          <div className={C.label}>Kênh quảng cáo</div>
+          <div className={`${C.label} text-right`}>Chi tiêu</div>
           <div className={`${C.label} text-right`}>ROAS</div>
-          <div className={`${C.label} text-right`}>Conv. Rate</div>
-          <div className={`${C.label} text-right`}>Conversions</div>
+          <div className={`${C.label} text-right`}>Tỷ lệ chuyển đổi</div>
+          <div className={`${C.label} text-right`}>Lượt chuyển đổi</div>
         </div>
         {channels.map((c) => (
           <div key={c.platform} className="grid grid-cols-5 gap-2 py-3 border-b border-[#E2E8F0] last:border-b-0 items-center">
@@ -402,8 +425,8 @@ function IssueRow({ account, issues }: { account: AccountSummary; issues: Issue[
               {account.platform === "meta" ? "Meta" : "Google Ads"}
             </span>
             <div className="flex items-center gap-2 sm:gap-3 text-[11px] flex-wrap">
-              <MiniDelta label="SPEND" value={moneyK(m.spend)} delta={ch(m.spend, p?.spend)} />
-              <MiniDelta label="CONV" value={num(m.conversions)} delta={ch(m.conversions, p?.conversions)} />
+              <MiniDelta label="CHI TIÊU" value={moneyK(m.spend, account.currency)} delta={ch(m.spend, p?.spend)} />
+              <MiniDelta label="CHUYỂN ĐỔI" value={num(m.conversions)} delta={ch(m.conversions, p?.conversions)} />
               <MiniDelta label="ROAS" value={x(m.roas)} delta={ch(m.roas, p?.roas)} />
             </div>
           </div>
@@ -417,7 +440,7 @@ function IssueRow({ account, issues }: { account: AccountSummary; issues: Issue[
                   <strong className="text-[#1A202C]">{it.title}</strong>: {it.detail}
                 </span>
                 <div className="text-[#475569] mt-0.5">
-                  <strong className="text-[#1A202C]">Action:</strong> {it.action}
+                  <strong className="text-[#1A202C]">Hành động đề xuất:</strong> {it.action}
                 </div>
               </div>
             </li>
@@ -446,7 +469,7 @@ function TopIssues({ items, title }: { items: { account: AccountSummary; issues:
 
 // ── Portfolio table ──────────────────────────────────────────────────────────
 
-function PortfolioTable({ accounts }: { accounts: AccountSummary[] }) {
+function PortfolioTable({ accounts, onSelectAccount }: { accounts: AccountSummary[]; onSelectAccount?: (id: string) => void }) {
   const maxCtr = Math.max(...accounts.map((a) => a.metrics.ctr), 1);
   const Bar = ({ w, color }: { w: number; color: string }) => (
     <div className="w-12 sm:w-16 h-1.5 bg-[#F1F5F9] rounded-full overflow-hidden flex-shrink-0">
@@ -460,13 +483,13 @@ function PortfolioTable({ accounts }: { accounts: AccountSummary[] }) {
         <table className="w-full min-w-[700px]">
           <thead>
             <tr className="border-b border-[#E2E8F0]">
-              <th className={th}>Account</th>
-              <th className={th}>Platform</th>
+              <th className={th}>Tài khoản</th>
+              <th className={th}>Nền tảng</th>
               <th className={th}>ROAS</th>
               <th className={th}>CTR</th>
-              <th className={`${th} text-right`}>Cost</th>
+              <th className={`${th} text-right`}>Chi phí</th>
               <th className={`${th} text-right`}>CPA</th>
-              <th className={`${th} text-right`}>Conv</th>
+              <th className={`${th} text-right`}>Chuyển đổi</th>
             </tr>
           </thead>
           <tbody>
@@ -474,8 +497,13 @@ function PortfolioTable({ accounts }: { accounts: AccountSummary[] }) {
               const m = a.metrics;
               const cpaBad = m.roas < 2;
               return (
-                <tr key={a.id} className="border-b border-[#E2E8F0] last:border-b-0 hover:bg-[#F1F5F9] transition-colors">
-                  <td className="px-3 sm:px-4 py-3"><span className="text-[12px] font-medium text-[#1A202C] whitespace-nowrap">{a.name}</span></td>
+                <tr key={a.id} onClick={() => onSelectAccount?.(a.id)} className={`border-b border-[#E2E8F0] last:border-b-0 hover:bg-[#F1F5F9] transition-colors ${onSelectAccount ? "cursor-pointer" : ""}`}>
+                  <td className="px-3 sm:px-4 py-3">
+                    <span className="text-[12px] font-medium text-[#1A202C] hover:text-[#DD5164] whitespace-nowrap flex items-center gap-1.5">
+                      {a.name}
+                      <span className="text-[10px] text-[#94A3B8] font-normal">→ Xem</span>
+                    </span>
+                  </td>
                   <td className="px-3 sm:px-4 py-3"><PlatformBadge platform={a.platform} /></td>
                   <td className="px-3 sm:px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -489,9 +517,9 @@ function PortfolioTable({ accounts }: { accounts: AccountSummary[] }) {
                       <Bar w={m.ctr / maxCtr} color={ctrColor(m.ctr)} />
                     </div>
                   </td>
-                  <td className="px-3 sm:px-4 py-3 text-right whitespace-nowrap"><span className="text-[12px] text-[#1A202C] tnum">{money(m.spend)}</span></td>
+                  <td className="px-3 sm:px-4 py-3 text-right whitespace-nowrap"><span className="text-[12px] text-[#1A202C] tnum">{money(m.spend, a.currency)}</span></td>
                   <td className="px-3 sm:px-4 py-3 text-right whitespace-nowrap">
-                    <span className="text-[12px] font-medium tnum" style={{ color: cpaBad ? BAD : "#1A202C" }}>{money(m.cpa)}</span>
+                    <span className="text-[12px] font-medium tnum" style={{ color: cpaBad ? BAD : "#1A202C" }}>{money(m.cpa, a.currency)}</span>
                   </td>
                   <td className="px-3 sm:px-4 py-3 text-right whitespace-nowrap"><span className="text-[12px] text-[#1A202C] tnum">{num(m.conversions)}</span></td>
                 </tr>
@@ -569,10 +597,12 @@ function ReportBlock({ block, daily }: { block: Block; daily: DailyPoint[] }) {
               <span className="absolute left-0 top-0.5 bottom-0.5 w-1 rounded-full" style={{ background: sevColor[f.severity] }} />
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[13px] font-semibold text-[#1A202C]">{f.title}</span>
-                <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${toneTint[f.severity === "high" ? "bad" : f.severity === "medium" ? "warn" : "info"]}`}>{f.severity}</span>
+                <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${toneTint[f.severity === "high" ? "bad" : f.severity === "medium" ? "warn" : "info"]}`}>
+                  {f.severity === "high" ? "Nghiêm trọng" : f.severity === "medium" ? "Cần lưu ý" : "Thông tin"}
+                </span>
               </div>
               <p className="text-[12px] text-[#475569] leading-relaxed mt-1">{f.detail}</p>
-              {f.recommendation && <p className="text-[12px] text-[#1A202C] leading-relaxed mt-1"><strong>Advise:</strong> {f.recommendation}</p>}
+              {f.recommendation && <p className="text-[12px] text-[#1A202C] leading-relaxed mt-1"><strong>Khuyến nghị:</strong> {f.recommendation}</p>}
             </li>
           ))}
         </ul>
@@ -582,7 +612,9 @@ function ReportBlock({ block, daily }: { block: Block; daily: DailyPoint[] }) {
         <ul className="space-y-2.5">
           {block.items.map((r, i) => (
             <li key={i} className="flex items-start gap-2.5">
-              <span className={`text-[11px] font-semibold rounded-[4px] px-1.5 py-0.5 tnum ${r.priority === "P0" ? "bg-[#FEF2F2] text-[#B91C1C] border border-[#FECACA]" : "text-[#475569] bg-[#F1F5F9] border border-[#E2E8F0]"}`}>{r.priority === "P0" ? "HIGH" : r.priority === "P1" ? "MED" : "LOW"}</span>
+              <span className={`text-[11px] font-semibold rounded-[4px] px-1.5 py-0.5 tnum ${r.priority === "P0" ? "bg-[#FEF2F2] text-[#B91C1C] border border-[#FECACA]" : "text-[#475569] bg-[#F1F5F9] border border-[#E2E8F0]"}`}>
+                {r.priority === "P0" ? "ƯU TIÊN CAO" : r.priority === "P1" ? "TRUNG BÌNH" : "THẤP"}
+              </span>
               <span className="text-[13px] text-[#1A202C] leading-relaxed flex-1">{r.text}</span>
               {r.impact && <span className="text-[11px] font-medium text-[#B45309] bg-[#FFFBEB] rounded-[4px] px-1.5 py-0.5 whitespace-nowrap tnum">{r.impact}</span>}
             </li>
@@ -605,8 +637,8 @@ function ReportBlock({ block, daily }: { block: Block; daily: DailyPoint[] }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[13px] font-semibold text-[#1A202C]">{cat.name}</span>
-                    <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${toneTint[cat.tone]}`}>{cat.rating ?? "no data"}</span>
-                    {cat.worst && <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#B91C1C]">← start here</span>}
+                    <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${toneTint[cat.tone]}`}>{cat.rating ?? "chưa có dữ liệu"}</span>
+                    {cat.worst && <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#B91C1C]">← bắt đầu từ đây</span>}
                   </div>
                   <p className="text-[12px] text-[#475569] leading-relaxed mt-0.5">{cat.detail}</p>
                 </div>
@@ -656,8 +688,8 @@ function ReportDocView({ doc }: { doc: ReportDoc }) {
             <div className="flex items-center gap-2 mt-2 flex-wrap text-[11px]">
               <PlatformBadge platform={doc.account.platform} />
               <span className={`${C.sub}`}>{doc.subtitle.split(" · ").slice(-1)[0]}</span>
-              <span className="text-[#475569] bg-[#F1F5F9] border border-[#E2E8F0] rounded-[4px] px-1.5 py-0.5">{doc.ai ? "AI analysis" : "rule-based"}</span>
-              {doc.preview && <span className="text-[#475569] bg-[#F1F5F9] border border-[#E2E8F0] rounded-[4px] px-1.5 py-0.5">preview</span>}
+              <span className="text-[#475569] bg-[#F1F5F9] border border-[#E2E8F0] rounded-[4px] px-1.5 py-0.5">{doc.ai ? "Phân tích bởi AI" : "Phân tích theo quy tắc"}</span>
+              {doc.preview && <span className="text-[#475569] bg-[#F1F5F9] border border-[#E2E8F0] rounded-[4px] px-1.5 py-0.5">xem trước</span>}
             </div>
           </div>
           <span className={`text-[12px] font-semibold rounded-full px-2.5 py-1 ${toneTint[doc.health.tone]}`}>{doc.health.label}</span>
@@ -692,10 +724,10 @@ function ReportGallery({
               <span className="inline-flex items-center gap-1">
                 {r.platforms.map((p) => <PlatformLogo key={p} platform={p} size={12} />)}
               </span>
-              {!r.available && <span className="text-[10px] text-[#475569] bg-white border border-[#E2E8F0] rounded-full px-1.5 py-0.5 uppercase tracking-[0.1em]">{r.locked ?? "soon"}</span>}
+              {!r.available && <span className="text-[10px] text-[#475569] bg-white border border-[#E2E8F0] rounded-full px-1.5 py-0.5 uppercase tracking-[0.1em]">{r.locked ?? "sắp ra mắt"}</span>}
               {mismatch && (
                 <span className="text-[10px] text-[#475569] bg-white border border-[#E2E8F0] rounded-full px-1.5 py-0.5 uppercase tracking-[0.1em]">
-                  {r.platforms[0] === "meta" ? "Meta only" : "Google only"}
+                  {r.platforms[0] === "meta" ? "Chỉ Meta" : "Chỉ Google"}
                 </span>
               )}
             </div>
@@ -709,7 +741,7 @@ function ReportGallery({
 
 // ── Top bar ──────────────────────────────────────────────────────────────────
 
-const RANGES = [{ label: "7D", days: 7 }, { label: "30D", days: 30 }, { label: "90D", days: 90 }];
+const RANGES = [{ label: "7 ngày", days: 7 }, { label: "30 ngày", days: 30 }, { label: "90 ngày", days: 90 }];
 type View = "account" | "portfolio" | "reports";
 const VIEWS: View[] = ["account", "portfolio", "reports"];
 
@@ -720,9 +752,9 @@ const initialView = (VIEWS as string[]).includes(initialParams.get("view") ?? ""
 const initialDays = RANGES.some((r) => String(r.days) === initialParams.get("days")) ? Number(initialParams.get("days")) : 30;
 
 const NAV_GROUPS = [{ items: [
-  { id: "portfolio", label: "Portfolio", icon: "layout-dashboard", href: "/?view=portfolio", home: true },
-  { id: "account", label: "Account", icon: "bar-chart-3", href: "/?view=account" },
-  { id: "reports", label: "Reports", icon: "file-text", href: "/?view=reports" },
+  { id: "portfolio", label: "Tổng quan danh mục", icon: "layout-dashboard", href: "/?view=portfolio", home: true },
+  { id: "account", label: "Chi tiết tài khoản", icon: "bar-chart-3", href: "/?view=account" },
+  { id: "reports", label: "Báo cáo phân tích", icon: "file-text", href: "/?view=reports" },
 ] }];
 
 function TopBar({
@@ -737,9 +769,9 @@ function TopBar({
   return (
     <div className="flex flex-col gap-3 mb-5 sm:mb-6 lg:flex-row lg:items-center lg:justify-between no-print">
       {embedded ? <div /> : <Segmented value={view} onChange={setView} options={[
-        { value: "account", label: "Account View" },
-        { value: "portfolio", label: "Portfolio View" },
-        { value: "reports", label: "Reports" },
+        { value: "portfolio", label: "Tổng quan danh mục" },
+        { value: "account", label: "Chi tiết tài khoản" },
+        { value: "reports", label: "Báo cáo phân tích" },
       ]} />}
 
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
@@ -748,7 +780,11 @@ function TopBar({
             {selected && <PlatformLogo platform={selected.platform} size={16} />}
             <select value={accountId ?? ""} onChange={(e) => setAccountId(e.target.value)}
               className="appearance-none bg-transparent min-w-[160px] text-[13px] font-medium text-[#1A202C] cursor-pointer focus:outline-none">
-              {accounts.length === 0 && <option value="">Select Account</option>}
+              {accounts.length === 0 ? (
+                <option value="">Chưa có tài khoản</option>
+              ) : !accountId ? (
+                <option value="">-- Chọn tài khoản --</option>
+              ) : null}
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name} · {a.platform === "meta" ? "Meta" : "Google"}</option>
               ))}
@@ -766,9 +802,9 @@ function TopBar({
           options={RANGES.map((r) => ({ value: String(r.days), label: r.label }))} />
 
         {view === "reports" ? (
-          <button onClick={onGenerate} disabled={generating || (!accountId && accounts.length > 0)}
+          <button onClick={onGenerate} disabled={generating || !accountId}
             className="inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-[6px] text-[13px] font-medium bg-[#DD5164] text-white hover:bg-[#C53A4E] transition-colors disabled:opacity-50 disabled:pointer-events-none">
-            <Sparkles className="w-4 h-4" />{generating ? "Generating…" : "Generate"}
+            <Sparkles className="w-4 h-4" />{generating ? "Đang tạo báo cáo…" : "Tạo báo cáo"}
           </button>
         ) : (
           <button onClick={onRefresh} className="p-2.5 h-9 border border-[#E2E8F0] bg-white hover:bg-[#F1F5F9] rounded-[6px] flex items-center justify-center" aria-label="Refresh">
@@ -820,6 +856,18 @@ export function App() {
 
   useEffect(() => { loadState(); }, []);
 
+  function loadAccounts() {
+    return fetch("/api/accounts").then((r) => r.json()).then((data) => {
+      const list: AccountRef[] = data.accounts ?? [];
+      if (list.length > 0) {
+        setAccounts(list);
+        setPreviewAccounts(Boolean(data.preview));
+        setAccountId((cur) => (cur && list.some((a) => a.id === cur) ? cur : list[0]?.id ?? null));
+      }
+      if (data.needsSync) setNeedsSync(true);
+    }).catch(() => {});
+  }
+
   // A sync is the only thing in this app that reads an ad platform, so it is an
   // explicit action rather than something a page view triggers.
   function runSyncNow() {
@@ -831,20 +879,21 @@ export function App() {
       .finally(() => {
         setSyncing(false);
         loadState();
+        loadAccounts();
         setNonce((n) => n + 1);
       });
   }
 
   useEffect(() => {
-    fetch("/api/accounts").then((r) => r.json()).then((data) => {
-      const list: AccountRef[] = data.accounts ?? [];
-      setAccounts(list);
-      setPreviewAccounts(Boolean(data.preview));
-      if (data.needsSync) setNeedsSync(true);
-      setAccountId((cur) => (cur && list.some((a) => a.id === cur) ? cur : list[0]?.id ?? null));
-    }).catch(() => {});
+    loadAccounts();
     fetch("/api/reports").then((r) => r.json()).then((d) => setRecipes(d.recipes ?? [])).catch(() => {});
-  }, []);
+  }, [nonce]);
+
+  useEffect(() => {
+    if (view === "account" && accounts.length === 0) {
+      loadAccounts();
+    }
+  }, [view, accounts.length]);
 
   // Switching to an account whose platform can't run the selected recipe falls
   // back to the cross-platform audit (live data only; preview swaps server-side).
@@ -859,7 +908,25 @@ export function App() {
     if (view !== "portfolio") return;
     setRefreshing(true); setError(null);
     fetch(`/api/portfolio?${qs}`).then((r) => r.json())
-      .then((d) => (d.error ? setError(d.error) : setPortfolio(d)))
+      .then((d) => {
+        if (d.error) {
+          setError(d.error);
+        } else {
+          setPortfolio(d);
+          if (d.accounts?.length > 0) {
+            setAccounts((prev) => {
+              if (prev.length > 0) return prev;
+              return d.accounts.map((a: any) => ({
+                id: a.id,
+                name: a.name,
+                platform: a.platform,
+                currency: a.currency,
+              }));
+            });
+            setAccountId((cur) => cur || d.accounts[0]?.id || null);
+          }
+        }
+      })
       .catch((e) => setError(String(e))).finally(() => setRefreshing(false));
   }, [view, qs, nonce]);
 
@@ -897,7 +964,8 @@ export function App() {
   }
 
   const preview = (view === "portfolio" ? portfolio?.preview : view === "account" ? account?.preview : report?.preview) ?? false;
-  const currency = account?.account.currency ?? "USD";
+  const portfolioCurrency = portfolio?.accounts?.[0]?.currency ?? "VND";
+  const currency = account?.account.currency ?? portfolioCurrency ?? "VND";
 
   return (
     <div className="min-h-screen bg-white">
@@ -923,13 +991,19 @@ export function App() {
         {view === "portfolio" && portfolio && (
           <div className="space-y-4 sm:space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-              <KpiCard left={{ label: "Total Spend", value: money(portfolio.totals.spend) }} right={{ label: "ROAS", value: x(portfolio.totals.roas) }} />
-              <KpiCard left={{ label: "Conversions", value: num(portfolio.totals.conversions) }} right={{ label: "CPA", value: money(portfolio.totals.cpa) }} />
-              <KpiCard left={{ label: "Clicks", value: num(portfolio.totals.clicks) }} right={{ label: "CTR", value: pct(portfolio.totals.ctr) }} />
+              <KpiCard left={{ label: "Tổng chi tiêu", value: money(portfolio.totals.spend, portfolioCurrency) }} right={{ label: "ROAS tổng", value: x(portfolio.totals.roas) }} />
+              <KpiCard left={{ label: "Lượt chuyển đổi", value: num(portfolio.totals.conversions) }} right={{ label: "CPA trung bình", value: money(portfolio.totals.cpa, portfolioCurrency) }} />
+              <KpiCard left={{ label: "Lượt nhấp", value: num(portfolio.totals.clicks) }} right={{ label: "CTR trung bình", value: pct(portfolio.totals.ctr) }} />
             </div>
             {preview && <PreviewBanner />}
-            <PortfolioTable accounts={portfolio.accounts} />
-            <TopIssues items={portfolio.topIssues} title="Top Issues to Fix (3 Lowest-ROAS Accounts)" />
+            <PortfolioTable
+              accounts={portfolio.accounts}
+              onSelectAccount={(id) => {
+                setAccountId(id);
+                setView("account");
+              }}
+            />
+            <TopIssues items={portfolio.topIssues} title="Top vấn đề cần tối ưu ngay (3 tài khoản ROAS thấp nhất)" />
           </div>
         )}
 
@@ -937,21 +1011,27 @@ export function App() {
         {view === "account" && account && (
           <div className="space-y-5 sm:space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-              <KpiCard left={{ label: "Cost", value: money(account.kpis.cost.value, currency), delta: account.kpis.cost }} right={{ label: "ROAS", value: x(account.kpis.roas.value), delta: account.kpis.roas }} />
-              <KpiCard left={{ label: "Conversions", value: num(account.kpis.conversions.value), delta: account.kpis.conversions }} right={{ label: "Conv. Rate", value: pct(account.kpis.convRate.value), delta: account.kpis.convRate }} />
-              <KpiCard left={{ label: "Clicks", value: num(account.kpis.clicks.value), delta: account.kpis.clicks }} right={{ label: "CTR", value: pct(account.kpis.ctr.value), delta: account.kpis.ctr }} />
+              <KpiCard left={{ label: "Chi phí", value: money(account.kpis.cost.value, currency), delta: account.kpis.cost }} right={{ label: "ROAS", value: x(account.kpis.roas.value), delta: account.kpis.roas }} />
+              <KpiCard left={{ label: "Lượt chuyển đổi", value: num(account.kpis.conversions.value), delta: account.kpis.conversions }} right={{ label: "Tỷ lệ chuyển đổi", value: pct(account.kpis.convRate.value), delta: account.kpis.convRate }} />
+              <KpiCard left={{ label: "Lượt nhấp", value: num(account.kpis.clicks.value), delta: account.kpis.clicks }} right={{ label: "CTR", value: pct(account.kpis.ctr.value), delta: account.kpis.ctr }} />
             </div>
             {preview && <PreviewBanner />}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-              <ComboChart data={account.daily} barKey="spend" lineKey="roas" barLabel="Cost" lineLabel="ROAS" />
-              <ComboChart data={account.daily} barKey="conversions" lineKey="convRate" barLabel="Conversions" lineLabel="Conv. Rate" />
-              <ComboChart data={account.daily} barKey="clicks" lineKey="ctr" barLabel="Clicks" lineLabel="CTR" />
+              <ComboChart data={account.daily} barKey="spend" lineKey="roas" barLabel="Chi phí" lineLabel="ROAS" />
+              <ComboChart data={account.daily} barKey="conversions" lineKey="convRate" barLabel="Chuyển đổi" lineLabel="Tỷ lệ chuyển đổi" />
+              <ComboChart data={account.daily} barKey="clicks" lineKey="ctr" barLabel="Lượt nhấp" lineLabel="CTR" />
             </div>
             <ChannelTable channels={account.channels} />
             <TopIssues
               items={[{ account: { ...account.account, metrics: account.channels[0]?.metrics ?? ({} as Metrics), prev: null }, issues: account.issues }].filter((i) => i.issues.length > 0)}
-              title="Top Issues to Fix"
+              title="Các vấn đề cần tối ưu"
             />
+          </div>
+        )}
+
+        {view === "account" && !account && (
+          <div className="py-20 text-center text-[13px] text-[#64748B] bg-white border border-[#E2E8F0] rounded-[6px]">
+            {refreshing ? "Đang tải dữ liệu tài khoản…" : "Vui lòng chọn tài khoản ở danh sách phía trên để xem biểu đồ chi tiết."}
           </div>
         )}
 
@@ -965,31 +1045,31 @@ export function App() {
               <>
                 <div className="no-print flex items-center justify-between gap-3">
                   <span className="text-[12px] text-[#475569]">
-                    {report.ai ? "Analysis by AI" : "Rule-based analysis"}
+                    {report.ai ? "Phân tích bởi AI" : "Phân tích theo quy tắc"}
                     {report.reusedData && (
-                      <span className="ml-2 text-[#92400E]" title={report.dataNote}>· reused recent data</span>
+                      <span className="ml-2 text-[#92400E]" title={report.dataNote}>· dùng lại dữ liệu gần đây</span>
                     )}
                   </span>
                   <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-[6px] text-[13px] font-medium bg-white border border-[#E2E8F0] text-[#1A202C] hover:bg-[#F1F5F9] transition-colors">
-                    <Download className="w-4 h-4" />Download PDF
+                    <Download className="w-4 h-4" />Tải bản PDF
                   </button>
                 </div>
                 <ReportDocView doc={report} />
               </>
             ) : (
               <div className="no-print py-20 text-center text-[13px] text-[#94A3B8]">
-                Pick a report and an account, then press Generate.
+                {accountId ? "Chọn loại báo cáo và bấm nút \"Tạo báo cáo\" ở góc trên." : "Vui lòng chọn một tài khoản ở thanh menu phía trên để tạo báo cáo."}
               </div>
             )}
           </div>
         )}
 
-        {!portfolio && !account && view !== "reports" && !error && <div className="py-24 text-center text-[13px] text-[#94A3B8]">Loading…</div>}
+        {!portfolio && !account && view !== "reports" && !error && <div className="py-24 text-center text-[13px] text-[#94A3B8]">Đang tải…</div>}
 
         <footer className="mt-8 sm:mt-12 pt-4 sm:pt-6 border-t border-[#E2E8F0] no-print">
-          <div className="flex items-center justify-end gap-6 text-[13px] text-[#475569]">
-            <span>OpenAdsReport</span>
-            <span className="font-mono text-[11px]">API: /api/portfolio · /api/account · /api/report</span>
+          <div className="flex items-center justify-between gap-6 text-[13px] text-[#475569] flex-wrap">
+            <span>OpenAdsReport · Nền tảng Báo cáo & Kiểm toán Quảng cáo Toàn diện</span>
+            <span className="font-mono text-[11px] text-[#94A3B8]">API: /api/portfolio · /api/account · /api/report</span>
           </div>
         </footer>
       </div>

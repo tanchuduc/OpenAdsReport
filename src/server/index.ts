@@ -1,6 +1,7 @@
 import { createApp } from "@clawnify/app";
 import type { Bindings } from "./env";
 import api from "./routes";
+import { runSync } from "./sync";
 
 const app = createApp<{ Bindings: Bindings }>({
   title: "OpenAdsReport",
@@ -20,4 +21,14 @@ app.all("*", (c) => {
   return (c.env as any).ASSETS ? (c.env as any).ASSETS.fetch(c.req.raw) : c.text("Not Found", 404);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(event: any, env: any, ctx: any) {
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(runSync(env).catch((e) => console.error("Cron sync error:", e)));
+    } else {
+      await runSync(env).catch((e) => console.error("Cron sync error:", e));
+    }
+  },
+};
+

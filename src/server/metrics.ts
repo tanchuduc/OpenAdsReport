@@ -110,7 +110,7 @@ export function resolveRange(opts: { since?: string; until?: string; days?: numb
  * EUR or GBP account is never told what it spent in dollars. Defaults to USD
  * only for the sample data, which is minted in USD.
  */
-export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoint[], currency = "USD"): Issue[] {
+export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoint[], currency = "VND"): Issue[] {
   const issues: Issue[] = [];
   const money = (n: number) => formatMoney(n, currency);
   const drop = (a: number, b: number | undefined) => (b && b > 0 ? ((a - b) / b) * 100 : null);
@@ -118,17 +118,17 @@ export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoi
   if (cur.spend > 0 && cur.roas < 1) {
     issues.push({
       id: "roas-below-1",
-      title: "Account is losing money",
-      detail: `ROAS is ${cur.roas.toFixed(2)}x — every unit of the ${money(cur.spend)} spent is returning less than it cost.`,
-      action: "Pause the lowest-ROAS campaigns and shift budget to your top performers before scaling anything.",
+      title: "Tài khoản đang chạy lỗ",
+      detail: `ROAS chỉ đạt ${cur.roas.toFixed(2)}x — mỗi đồng trong số ${money(cur.spend)} chi tiêu thu về ít hơn chi phí bỏ ra.`,
+      action: "Tạm dừng các chiến dịch có ROAS thấp nhất và chuyển ngân sách sang các chiến dịch hiệu quả trước khi tăng quy mô.",
       severity: "high",
     });
   } else if (cur.spend > 0 && cur.roas < 2) {
     issues.push({
       id: "roas-thin",
-      title: "ROAS below a healthy target",
-      detail: `ROAS is ${cur.roas.toFixed(2)}x, under the 2.0x most accounts need to stay profitable after fees and COGS.`,
-      action: "Tighten targeting and cut the bottom 20% of ad sets by ROAS to lift the blended return.",
+      title: "ROAS dưới ngưỡng sinh lời an toàn",
+      detail: `ROAS đạt ${cur.roas.toFixed(2)}x, thấp hơn ngưỡng 2.0x thường cần để đảm bảo lợi nhuận sau khi trừ giá vốn và chi phí vận hành.`,
+      action: "Thu hẹp tệp mục tiêu và cắt giảm 20% nhóm quảng cáo có ROAS thấp nhất để nâng cao tỷ suất hoàn vốn tổng thể.",
       severity: "medium",
     });
   }
@@ -137,9 +137,9 @@ export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoi
   if (prev && cpaChange !== null && cpaChange > 15 && cur.spend > 0) {
     issues.push({
       id: "cpa-rising",
-      title: "CPA is climbing",
-      detail: `Cost per acquisition rose ${cpaChange.toFixed(0)}% vs the prior period (now ${money(cur.cpa)}).`,
-      action: "Refresh fatigued creative and re-check audience overlap — rising CPA usually means saturation.",
+      title: "Chi phí mỗi chuyển đổi (CPA) đang tăng",
+      detail: `Giá mỗi chuyển đổi tăng ${cpaChange.toFixed(0)}% so với kỳ trước (hiện tại là ${money(cur.cpa)}).`,
+      action: "Làm mới các mẫu quảng cáo đã bị bão hòa và kiểm tra độ trùng lặp đối tượng — CPA tăng thường là dấu hiệu tệp khán giả bị bão hòa.",
       severity: cpaChange > 30 ? "high" : "medium",
     });
   }
@@ -148,9 +148,9 @@ export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoi
   if (prev && ctrChange !== null && ctrChange < -10) {
     issues.push({
       id: "ctr-falling",
-      title: "CTR is declining — creative fatigue",
-      detail: `Click-through rate fell ${Math.abs(ctrChange).toFixed(0)}% vs the prior period (now ${cur.ctr.toFixed(2)}%).`,
-      action: "Rotate in 3 fresh creative variations on your top ad sets and retire the worst performers.",
+      title: "CTR sụt giảm — Mẫu quảng cáo bị bão hòa",
+      detail: `Tỷ lệ nhấp (CTR) giảm ${Math.abs(ctrChange).toFixed(0)}% so với kỳ trước (hiện tại là ${cur.ctr.toFixed(2)}%).`,
+      action: "Bổ sung thêm 3 biến thể nội dung quảng cáo mới cho nhóm quảng cáo hàng đầu và tắt các mẫu quảng cáo kém hiệu quả.",
       severity: "medium",
     });
   }
@@ -158,9 +158,9 @@ export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoi
   if (cur.clicks > 100 && cur.convRate < 1) {
     issues.push({
       id: "low-conv-rate",
-      title: "Low conversion rate",
-      detail: `Only ${cur.convRate.toFixed(2)}% of ${formatNum(cur.clicks)} clicks converted — the leak is after the click.`,
-      action: "Audit landing-page speed and message match, and confirm conversion tracking is firing once (not twice).",
+      title: "Tỷ lệ chuyển đổi thấp",
+      detail: `Chỉ ${cur.convRate.toFixed(2)}% trong tổng số ${formatNum(cur.clicks)} lượt nhấp có phát sinh chuyển đổi — điểm thất thoát nằm ở trải nghiệm trang đích sau nhấp chuột.`,
+      action: "Kiểm tra tốc độ tải trang đích, tính nhất quán thông điệp giữa quảng cáo và web, đồng thời xác nhận mã chuyển đổi hoạt động chuẩn xác.",
       severity: "medium",
     });
   }
@@ -171,9 +171,9 @@ export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoi
   if (prev && spendUp !== null && convDown !== null && spendUp > 5 && convDown < -5) {
     issues.push({
       id: "spend-up-conv-down",
-      title: "Spending more, converting less",
-      detail: `Spend is up ${spendUp.toFixed(0)}% but conversions are down ${Math.abs(convDown).toFixed(0)}% vs the prior period.`,
-      action: "Cap budgets on the campaigns driving the extra spend until their conversion volume recovers.",
+      title: "Chi tiêu tăng nhưng chuyển đổi lại giảm",
+      detail: `Chi tiêu tăng ${spendUp.toFixed(0)}% nhưng lượt chuyển đổi lại giảm ${Math.abs(convDown).toFixed(0)}% so với kỳ trước.`,
+      action: "Đặt trần giới hạn ngân sách cho các chiến dịch đang ngốn thêm chi tiêu cho đến khi số lượng chuyển đổi phục hồi.",
       severity: "high",
     });
   }
@@ -181,8 +181,12 @@ export function deriveIssues(cur: Metrics, prev: Metrics | null, daily: DailyPoi
   return issues;
 }
 
-const formatMoney = (n: number, currency: string) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
+const formatMoney = (n: number, currency: string) => {
+  if (currency === "VND" || currency === "VNĐ") {
+    return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(Math.round(n));
+  }
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
+};
 
 const formatNum = (n: number) =>
   n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(Math.round(n));
