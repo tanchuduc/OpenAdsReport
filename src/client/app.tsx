@@ -60,7 +60,7 @@ type ReportDoc = {
   recipe: string; title: string; subtitle: string;
   account: { name: string; platform: Platform; currency: string };
   range: { since: string; until: string; days: number };
-  health: { label: "Healthy" | "Watch" | "At risk"; tone: Tone; line: string };
+  health: { label: string; tone: Tone; line: string };
   sections: ReportSection[]; daily: DailyPoint[]; ai: boolean; preview: boolean; generatedAt: string;
   /** Set when the recipe's dataset was reused from a recent pull rather than fetched fresh. */
   reusedData?: boolean; dataNote?: string;

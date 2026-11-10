@@ -13,7 +13,7 @@ import type { AccountSummary, Issue, Platform, PortfolioReport } from "./provide
 import { connectedProviders, getProvider } from "./providers";
 import { deriveIssues, resolveRange, sumMetrics } from "./metrics";
 import { describe, secret } from "@clawnify/connections";
-import { aiHints } from "./ai";
+import { aiHints, getAiConfig } from "./ai";
 import { REQUIRES } from "./requires";
 import type { Bindings } from "./env";
 import { sampleAccountRefs, sampleAccountReport, samplePortfolio, samplePreviewReport, sampleRecipeData } from "./sample";
@@ -28,16 +28,16 @@ import { verifyDelivery } from "@clawnify/queue";
 
 const api = new Hono<{ Bindings: Bindings }>();
 
-/** Upgrade an account's issues to AI-generated hints when OpenRouter is configured. */
+/** Upgrade an account's issues to AI-generated hints when Gemini or OpenRouter is configured. */
 async function hintsFor(
   env: Bindings,
   acc: AccountSummary,
   fallback: Issue[],
   days: number,
 ): Promise<Issue[]> {
-  const key = secret("OPENROUTER_API_KEY", env);
-  if (!key) return fallback;
-  const ai = await aiHints(key, {
+  const config = getAiConfig(env);
+  if (!config) return fallback;
+  const ai = await aiHints(config, {
     accountName: acc.name,
     platform: acc.platform,
     currency: acc.currency,
@@ -106,7 +106,7 @@ api.get("/api/state", async (c) => {
     // never state it.
     freshness,
     platforms: ["meta", "google"] as Platform[],
-    aiHints: !!secret("OPENROUTER_API_KEY", c.env),
+    aiHints: !!getAiConfig(c.env),
     // What the live-read allowance looks like right now, so the UI can explain
     // a refused report before the user asks for one.
     budget: await budgetStatus(),
@@ -178,7 +178,7 @@ api.get("/api/account", async (c) => {
       );
     }
 
-    if (secret("OPENROUTER_API_KEY", c.env)) {
+    if (getAiConfig(c.env)) {
       const cur = report.channels[0]?.metrics;
       const k = report.kpis;
       const prev = k.cost.prev !== null
@@ -253,14 +253,14 @@ api.get("/api/report", async (c) => {
   const range = rangeFromQuery(c);
   const accountId = c.req.query("account_id");
   const platform = c.req.query("platform") as Platform | undefined;
-  const apiKey = secret("OPENROUTER_API_KEY", c.env);
+  const aiConfig = getAiConfig(c.env);
   const providers = await connectedProviders(c.env);
 
   try {
     if (providers.length === 0) {
       // Preview mode: the sample account's platform must match the recipe.
       const report = samplePreviewReport(range, accountId || undefined, recipe.platforms);
-      return c.json(await generateReport(recipe.id, report, apiKey, sampleRecipeData(recipe.id, report, range)));
+      return c.json(await generateReport(recipe.id, report, aiConfig, sampleRecipeData(recipe.id, report, range)));
     }
 
 
@@ -306,7 +306,7 @@ api.get("/api/report", async (c) => {
               : { audit: await provider.auditData(accountId, range).catch(() => null) },
     );
 
-    const doc = await generateReport(recipe.id, report, apiKey, read.data);
+    const doc = await generateReport(recipe.id, report, aiConfig, read.data);
     // A reused pull is still a real answer, just not a fresh one — say so
     // rather than implying the numbers were fetched a moment ago.
     return c.json(read.fresh ? doc : { ...doc, reusedData: true, dataNote: read.note });

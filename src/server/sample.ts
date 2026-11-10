@@ -35,11 +35,14 @@ const SEEDS: Seed[] = [
   { id: "act_910100004", name: "Peak Healthcare", platform: "meta", spend: 3120.4, roas: 4.2, conversions: 89, ctr: 1.8, clicks: 2166 },
 ];
 
+const VND_SCALE = 25000;
+
 function seedMetrics(s: Seed) {
   const impressions = Math.round(s.clicks / (s.ctr / 100));
+  const spend = Math.round(s.spend * VND_SCALE);
   return metrics({
-    spend: s.spend,
-    revenue: s.spend * s.roas,
+    spend,
+    revenue: Math.round(spend * s.roas),
     conversions: s.conversions,
     clicks: s.clicks,
     impressions,
@@ -56,53 +59,53 @@ function summary(s: Seed): AccountSummary {
     clicks: cur.clicks * 0.96,
     impressions: cur.impressions * 0.95,
   });
-  return { id: s.id, name: s.name, platform: s.platform, currency: "USD", metrics: cur, prev };
+  return { id: s.id, name: s.name, platform: s.platform, currency: "VND", metrics: cur, prev };
 }
 
 export const sampleAccountRefs = (): AccountRef[] =>
-  SEEDS.map((s) => ({ id: s.id, name: s.name, platform: s.platform, currency: "USD" }));
+  SEEDS.map((s) => ({ id: s.id, name: s.name, platform: s.platform, currency: "VND" }));
 
 const SAMPLE_ISSUES: Record<string, Issue[]> = {
   "Acme E-commerce": [
     {
       id: "conv-tracking",
-      title: "Conversion tracking broken",
-      detail: "No conversions recorded in 72 hours despite 1,240 clicks. The GTM tag is misfiring on the checkout success page.",
-      action: "Verify the conversion tag in GTM and fire a manual test purchase to confirm it records in Google Ads.",
+      title: "Theo dõi chuyển đổi bị lỗi",
+      detail: "Không ghi nhận lượt chuyển đổi nào trong 72 giờ qua dù có 1.240 lượt nhấp. Thẻ Google Tag Manager (GTM) đang bị lỗi kích hoạt trên trang cảm ơn / thanh toán thành công.",
+      action: "Kiểm tra lại thẻ theo dõi chuyển đổi trong GTM và thực hiện đơn hàng thử nghiệm (test purchase) để xác nhận dữ liệu ghi nhận về Google Ads.",
       severity: "high",
     },
     {
       id: "feed-disapprovals",
-      title: "Shopping feed disapprovals climbing",
-      detail: "142 products disapproved over the last 7 days — missing GTIN and incorrect availability flags.",
-      action: "Re-sync the Merchant Center feed and add GTINs from the product database for the disapproved SKUs.",
+      title: "Sản phẩm Google Shopping bị từ chối tăng cao",
+      detail: "142 sản phẩm bị từ chối phê duyệt trong 7 ngày qua — nguyên nhân do thiếu mã GTIN và gắn sai trạng thái tình trạng còn hàng.",
+      action: "Đồng bộ lại nguồn cấp dữ liệu Merchant Center và cập nhật bổ sung mã GTIN từ cơ sở dữ liệu sản phẩm cho các SKU bị từ chối.",
       severity: "high",
     },
   ],
   "Cinder Gaming": [
     {
       id: "roas-collapse",
-      title: "Campaigns are deep underwater",
-      detail: "ROAS of 0.6x means $4.2K of spend returned about $2.5K — the account is losing money every day it runs.",
-      action: "Pause the bottom three ad sets immediately and consolidate budget into the single best-performing audience.",
+      title: "Chiến dịch đang bị lỗ nặng",
+      detail: "ROAS chỉ đạt 0.6x nghĩa là chi 103,8 Tr ₫ chỉ thu về khoảng 62,3 Tr ₫ doanh thu — tài khoản đang lỗ liên tục mỗi ngày chạy quảng cáo.",
+      action: "Tạm dừng ngay 3 nhóm quảng cáo kém nhất và dồn ngân sách vào tệp đối tượng có hiệu quả chuyển đổi cao nhất.",
       severity: "high",
     },
   ],
   "Drift Apparel": [
     {
       id: "broad-waste",
-      title: "Broad match is draining budget",
-      detail: "Broad-match keywords are capturing irrelevant queries with a 1.1% CTR and almost no conversions.",
-      action: "Add 20+ exact negatives and switch the worst broad terms to phrase match.",
+      title: "Từ khóa đối sánh rộng gây lãng phí ngân sách",
+      detail: "Các từ khóa đối sánh rộng đang hút phải nhiều truy vấn tìm kiếm không liên quan với CTR chỉ 1.1% và hầu như không tạo ra chuyển đổi.",
+      action: "Thêm ngay hơn 20 từ khóa phủ định chính xác và chuyển đổi các từ khóa rộng kém hiệu quả sang đối sánh cụm từ (phrase match).",
       severity: "medium",
     },
   ],
   "Vertex Finance": [
     {
       id: "qs-drop",
-      title: "Quality Scores dropping",
-      detail: "Average Quality Score is down from 7.2 to 5.1 over the last 30 days, hurting ad rank and inflating CPCs.",
-      action: "Group keywords by intent and rewrite ad copy + landing-page headlines to match top-funnel queries.",
+      title: "Điểm chất lượng (Quality Score) sụt giảm",
+      detail: "Điểm chất lượng trung bình giảm từ 7.2 xuống 5.1 trong 30 ngày qua, làm tụt thứ hạng hiển thị và đội chi phí CPC lên cao.",
+      action: "Gom nhóm từ khóa theo sát ý định tìm kiếm và viết lại mẫu quảng cáo + tiêu đề trang đích để đồng bộ với các truy vấn hàng đầu.",
       severity: "medium",
     },
   ],
@@ -191,21 +194,21 @@ const SAMPLE_SEARCH_TERMS: Array<[string, string, string, number, number, number
 const sampleGoogleAudit = (): GoogleAudit => ({
   platform: "google",
   searchTerms: SAMPLE_SEARCH_TERMS.map(([term, campaign, matchType, spend, clicks, conversions, revenue]) => ({
-    term, campaign, matchType, spend, clicks, conversions, revenue,
+    term, campaign, matchType, spend: spend * VND_SCALE, clicks, conversions, revenue: revenue * VND_SCALE,
     impressions: clicks * 40,
   })),
   keywords: [
-    { keyword: "running shoes", campaign: "Search - Core", qualityScore: 8, spend: 2100, clicks: 1040 },
-    { keyword: "trail running shoes", campaign: "Search - Core", qualityScore: 7, spend: 640, clicks: 300 },
-    { keyword: "buy sneakers online", campaign: "Search - Promo", qualityScore: 4, spend: 590, clicks: 310 },
-    { keyword: "shoes", campaign: "Search - Promo", qualityScore: 3, spend: 470, clicks: 260 },
-    { keyword: "waterproof running shoes", campaign: "Search - Core", qualityScore: 9, spend: 260, clicks: 120 },
-    { keyword: "running gear", campaign: "Search - Blog", qualityScore: 5, spend: 210, clicks: 140 },
+    { keyword: "running shoes", campaign: "Search - Core", qualityScore: 8, spend: 2100 * VND_SCALE, clicks: 1040 },
+    { keyword: "trail running shoes", campaign: "Search - Core", qualityScore: 7, spend: 640 * VND_SCALE, clicks: 300 },
+    { keyword: "buy sneakers online", campaign: "Search - Promo", qualityScore: 4, spend: 590 * VND_SCALE, clicks: 310 },
+    { keyword: "shoes", campaign: "Search - Promo", qualityScore: 3, spend: 470 * VND_SCALE, clicks: 260 },
+    { keyword: "waterproof running shoes", campaign: "Search - Core", qualityScore: 9, spend: 260 * VND_SCALE, clicks: 120 },
+    { keyword: "running gear", campaign: "Search - Blog", qualityScore: 5, spend: 210 * VND_SCALE, clicks: 140 },
   ],
   campaigns: [
-    { id: "1", name: "Search - Core", biddingStrategy: "TARGET_ROAS", spend: 6200, conversions: 210, searchImpressionShare: 0.62, lostBudgetShare: 0.21, lostRankShare: 0.17 },
-    { id: "2", name: "Search - Promo", biddingStrategy: "MANUAL_CPC", spend: 3100, conversions: 48, searchImpressionShare: 0.41, lostBudgetShare: 0.08, lostRankShare: 0.51 },
-    { id: "3", name: "Search - Blog", biddingStrategy: "MAXIMIZE_CLICKS", spend: 890, conversions: 2, searchImpressionShare: 0.55, lostBudgetShare: 0.02, lostRankShare: 0.43 },
+    { id: "1", name: "Search - Core", biddingStrategy: "TARGET_ROAS", spend: 6200 * VND_SCALE, conversions: 210, searchImpressionShare: 0.62, lostBudgetShare: 0.21, lostRankShare: 0.17 },
+    { id: "2", name: "Search - Promo", biddingStrategy: "MANUAL_CPC", spend: 3100 * VND_SCALE, conversions: 48, searchImpressionShare: 0.41, lostBudgetShare: 0.08, lostRankShare: 0.51 },
+    { id: "3", name: "Search - Blog", biddingStrategy: "MAXIMIZE_CLICKS", spend: 890 * VND_SCALE, conversions: 2, searchImpressionShare: 0.55, lostBudgetShare: 0.02, lostRankShare: 0.43 },
   ],
   adStrength: { excellent: 4, good: 11, average: 9, poor: 3, pending: 1 },
   conversionActions: [
@@ -217,24 +220,24 @@ const sampleGoogleAudit = (): GoogleAudit => ({
 
 const SAMPLE_ADS: Array<[string, string, string, number, number, number, number, number, number, number, number]> = [
   // name, adset, campaign, curSpend, curFreq, curCtr, curConv, prevSpend, prevFreq, prevCtr, prevConv
-  ["UGC - Sarah unboxing", "Prospecting - Broad", "Evergreen", 2140, 1.6, 2.31, 42, 1980, 1.5, 2.24, 40],
-  ["Founder story v2", "Prospecting - Lookalike", "Evergreen", 1730, 2.9, 1.12, 14, 1590, 2.2, 1.58, 21],
-  ["Spring drop carousel", "Retargeting - 30d", "Promo", 1410, 3.4, 0.96, 18, 1360, 2.7, 1.31, 24],
-  ["Review mashup 15s", "Prospecting - Broad", "Evergreen", 980, 1.9, 1.87, 19, 870, 1.8, 1.79, 16],
-  ["Static - price anchor", "Retargeting - 7d", "Promo", 640, 2.2, 1.41, 11, 700, 2.1, 1.44, 12],
-  ["Podcast clip B", "Prospecting - Interests", "Evergreen", 410, 1.3, 1.66, 6, 280, 1.2, 1.52, 4],
+  ["UGC - Khui hộp trải nghiệm", "Tiếp cận - Đối tượng rộng", "Evergreen", 2140 * VND_SCALE, 1.6, 2.31, 42, 1980 * VND_SCALE, 1.5, 2.24, 40],
+  ["Câu chuyện thương hiệu v2", "Tiếp cận - Lookalike", "Evergreen", 1730 * VND_SCALE, 2.9, 1.12, 14, 1590 * VND_SCALE, 2.2, 1.58, 21],
+  ["Bộ sưu tập mới Carousel", "Bám đuổi lại - 30 ngày", "Khuyến mãi", 1410 * VND_SCALE, 3.4, 0.96, 18, 1360 * VND_SCALE, 2.7, 1.31, 24],
+  ["Video đánh giá ngắn 15s", "Tiếp cận - Đối tượng rộng", "Evergreen", 980 * VND_SCALE, 1.9, 1.87, 19, 870 * VND_SCALE, 1.8, 1.79, 16],
+  ["Ảnh tĩnh - Ưu đãi giảm giá", "Bám đuổi lại - 7 ngày", "Khuyến mãi", 640 * VND_SCALE, 2.2, 1.41, 11, 700 * VND_SCALE, 2.1, 1.44, 12],
+  ["Trích đoạn Podcast", "Tiếp cận - Sở thích", "Evergreen", 410 * VND_SCALE, 1.3, 1.66, 6, 280 * VND_SCALE, 1.2, 1.52, 4],
 ];
 
 const sampleAdFatigue = (): AdFatigueRow[] =>
   SAMPLE_ADS.map(([adName, adsetName, campaignName, s, f, c, conv, ps, pf, pc, pconv], i) => {
     const win = (spend: number, freq: number, ctrPct: number, conversions: number) => {
-      const clicks = Math.round(spend / 1.4);
+      const clicks = Math.round(spend / (1.4 * VND_SCALE));
       const impressions = Math.round(clicks / (ctrPct / 100));
       return {
         spend, impressions, clicks, conversions,
         frequency: freq,
         ctr: ctrPct,
-        cpm: (spend / impressions) * 1000,
+        cpm: impressions > 0 ? (spend / impressions) * 1000 : 0,
         cpa: conversions > 0 ? spend / conversions : 0,
       };
     };
@@ -255,12 +258,12 @@ const sampleMetaAudit = (): MetaAudit => ({
 
 const SAMPLE_PAGES: Array<[string, string, number, number, number, number, number, number, number, number, number, number]> = [
   // page, source/medium, curSessions, curBouncePct, curConv, curRevenue, curTx, prevSessions, prevBouncePct, prevConv, prevRevenue, prevTx
-  ["/products/trail-x2", "google / cpc", 4180, 38, 176, 21400, 168, 3950, 36, 182, 22100, 174],
-  ["/landing/spring-sale", "facebook / paid", 3620, 61, 74, 8100, 71, 3410, 44, 132, 15300, 128],
-  ["/products/road-one", "google / cpc", 2890, 41, 98, 11900, 95, 2760, 42, 91, 11000, 88],
-  ["/collections/womens", "instagram / paid", 2140, 48, 51, 5400, 49, 2300, 47, 58, 6300, 55],
-  ["/landing/free-trial", "google / cpc", 1760, 71, 12, 900, 9, 1690, 52, 38, 3200, 31],
-  ["/blog/best-running-shoes", "google / cpc", 980, 66, 4, 380, 4, 1020, 64, 5, 420, 5],
+  ["/products/trail-x2", "google / cpc", 4180, 38, 176, 21400 * VND_SCALE, 168, 3950, 36, 182, 22100 * VND_SCALE, 174],
+  ["/landing/spring-sale", "facebook / paid", 3620, 61, 74, 8100 * VND_SCALE, 71, 3410, 44, 132, 15300 * VND_SCALE, 128],
+  ["/products/road-one", "google / cpc", 2890, 41, 98, 11900 * VND_SCALE, 95, 2760, 42, 91, 11000 * VND_SCALE, 88],
+  ["/collections/womens", "instagram / paid", 2140, 48, 51, 5400 * VND_SCALE, 49, 2300, 47, 58, 6300 * VND_SCALE, 55],
+  ["/landing/free-trial", "google / cpc", 1760, 71, 12, 900 * VND_SCALE, 9, 1690, 52, 38, 3200 * VND_SCALE, 31],
+  ["/blog/best-running-shoes", "google / cpc", 980, 66, 4, 380 * VND_SCALE, 4, 1020, 64, 5, 420 * VND_SCALE, 5],
 ];
 
 const sampleLandingPages = (): import("./providers/ga").LandingPagesResult => ({
@@ -298,7 +301,7 @@ export function sampleAccountReport(range: DateRange, accountId?: string): Accou
     impressions: cur.impressions,
   });
   return {
-    account: { id: seed.id, name: seed.name, platform: seed.platform, currency: "USD" },
+    account: { id: seed.id, name: seed.name, platform: seed.platform, currency: "VND" },
     range: { since: range.since, until: range.until, days: range.days },
     kpis: buildKpis(cur, sum.prev),
     daily,

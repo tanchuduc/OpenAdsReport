@@ -9,6 +9,7 @@ import type { AccountReport, AdFatigueRow, AuditData, DailyPoint, Issue, Metrics
 import type { LandingPageRow, LandingPagesResult } from "./providers/ga";
 import { deriveIssues } from "./metrics";
 import { flagFatigue, scaleCandidates, scoreAudit, summarizeWaste, type Rating, type ScoredAudit } from "./audit";
+import { type AIConfig, callAI, parseJsonSafe } from "./ai";
 
 // ── Document schema (mirrored client-side in report.tsx) ─────────────────────
 
@@ -52,7 +53,7 @@ export interface ReportDoc {
   subtitle: string;
   account: { name: string; platform: Platform; currency: string };
   range: { since: string; until: string; days: number };
-  health: { label: "Healthy" | "Watch" | "At risk"; tone: Tone; line: string };
+  health: { label: "Healthy" | "Watch" | "At risk" | "Khỏe mạnh" | "Cần theo dõi" | "Rủi ro cao" | string; tone: Tone; line: string };
   sections: Section[];
   /** Backs the chart blocks (kept once, not per-block). */
   daily: DailyPoint[];
@@ -74,10 +75,10 @@ export interface RecipeMeta {
 }
 
 export const RECIPES: RecipeMeta[] = [
-  { id: "account-audit", name: "Account Audit", blurb: "Scored health check — /100 across tracking, waste, coverage and creative, with dollar-ranked fixes.", available: true, platforms: ["meta", "google"] },
-  { id: "search-terms", name: "Search Terms", blurb: "Wasted-spend and negative-keyword opportunities.", available: true, platforms: ["google"] },
-  { id: "creative-fatigue", name: "Creative Fatigue", blurb: "Declining creatives — what to pause, refresh, and scale.", available: true, platforms: ["meta"] },
-  { id: "landing-page", name: "Landing Page Analysis", blurb: "Where paid traffic leaks after the click — conversion drops, bounce spikes, and the fix order by recoverable revenue.", available: true, platforms: ["meta", "google"] },
+  { id: "account-audit", name: "Kiểm toán tài khoản", blurb: "Đánh giá sức khỏe tổng thể — chấm điểm /100 về tracking, lãng phí, độ phủ và mẫu quảng cáo, xếp hạng ưu tiên khắc phục.", available: true, platforms: ["meta", "google"] },
+  { id: "search-terms", name: "Truy vấn tìm kiếm", blurb: "Phát hiện chi tiêu lãng phí và cơ hội thêm từ khóa phủ định.", available: true, platforms: ["google"] },
+  { id: "creative-fatigue", name: "Độ bão hòa quảng cáo", blurb: "Quảng cáo suy giảm hiệu quả — nên tạm dừng, làm mới hay mở rộng quy mô.", available: true, platforms: ["meta"] },
+  { id: "landing-page", name: "Phân tích trang đích", blurb: "Điểm thất thoát sau nhấp chuột — chuyển đổi giảm, tỷ lệ thoát tăng và thứ tự ưu tiên tối ưu theo doanh thu có thể cứu vãn.", available: true, platforms: ["meta", "google"] },
 ];
 
 /** Data the routes pre-fetch for a recipe; only the field the recipe needs is set. */
@@ -90,10 +91,22 @@ export interface RecipeData {
 
 // ── Formatters (server-side → report carries display strings) ─────────────────
 
-const money = (n: number, cur: string) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: cur, maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
-const moneyK = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(0)}`);
-const num = (n: number) => new Intl.NumberFormat("en-US").format(Math.round(n));
+const money = (n: number, cur: string) => {
+  if (cur === "VND" || cur === "VNĐ") {
+    return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(Math.round(n));
+  }
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: cur, maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
+};
+const moneyK = (n: number, cur = "VND") => {
+  if (cur === "VND" || cur === "VNĐ") {
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} Tỷ ₫`;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} Tr ₫`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K ₫`;
+    return `${Math.round(n)} ₫`;
+  }
+  return n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(0)}`;
+};
+const num = (n: number) => new Intl.NumberFormat("vi-VN").format(Math.round(n));
 const pct = (n: number) => `${n.toFixed(1)}%`;
 const xroas = (n: number) => `${n.toFixed(1)}x`;
 const roasTone = (r: number): Tone => (r >= 2.5 ? "good" : r >= 1 ? "warn" : "bad");
@@ -105,9 +118,6 @@ interface Analysis {
   findings: { title: string; detail: string; severity: Severity; recommendation?: string }[];
   recommendations: { text: string; priority: "P0" | "P1" | "P2" }[];
 }
-
-const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "google/gemini-3.1-flash-lite";
 
 const SYSTEM = (reportName: string) => `You are a senior paid-media analyst writing a ${reportName} report for a client.
 You DIAGNOSE and ADVISE — you never execute changes. Ground every claim in the numbers given.
@@ -138,27 +148,16 @@ function snapshot(report: AccountReport): string {
   return lines.join("\n");
 }
 
-async function aiAnalysis(apiKey: string, reportName: string, user: string): Promise<Analysis | null> {
+async function aiAnalysis(
+  configOrKey: AIConfig | string,
+  reportName: string,
+  user: string,
+): Promise<Analysis | null> {
   try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.3,
-        max_tokens: 1100,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: SYSTEM(reportName) },
-          { role: "user", content: user },
-        ],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    const content = data?.choices?.[0]?.message?.content;
+    const content = await callAI(configOrKey, SYSTEM(reportName), user, 1100);
     if (!content) return null;
-    const p = JSON.parse(content);
+    const p = parseJsonSafe<any>(content);
+    if (!p) return null;
     const sev = (s: any): Severity => (s === "high" || s === "low" ? s : "medium");
     const prio = (s: any): "P0" | "P1" | "P2" => (s === "P0" || s === "P2" ? s : "P1");
     return {
@@ -232,11 +231,11 @@ function kpiBlock(report: AccountReport, currency: string): Block {
   return {
     kind: "kpis",
     items: [
-      { label: "Cost", value: money(k.cost.value, currency), deltaPct: k.cost.deltaPct, higherIsBetter: true },
+      { label: "Chi phí", value: money(k.cost.value, currency), deltaPct: k.cost.deltaPct, higherIsBetter: true },
       { label: "ROAS", value: xroas(k.roas.value), deltaPct: k.roas.deltaPct, higherIsBetter: true },
-      { label: "Conversions", value: num(k.conversions.value), deltaPct: k.conversions.deltaPct, higherIsBetter: true },
-      { label: "Conv. Rate", value: pct(k.convRate.value), deltaPct: k.convRate.deltaPct, higherIsBetter: true },
-      { label: "Clicks", value: num(k.clicks.value), deltaPct: k.clicks.deltaPct, higherIsBetter: true },
+      { label: "Chuyển đổi", value: num(k.conversions.value), deltaPct: k.conversions.deltaPct, higherIsBetter: true },
+      { label: "Tỷ lệ chuyển đổi", value: pct(k.convRate.value), deltaPct: k.convRate.deltaPct, higherIsBetter: true },
+      { label: "Lượt nhấp", value: num(k.clicks.value), deltaPct: k.clicks.deltaPct, higherIsBetter: true },
       { label: "CTR", value: pct(k.ctr.value), deltaPct: k.ctr.deltaPct, higherIsBetter: true },
     ],
   };
@@ -246,11 +245,11 @@ function channelTable(report: AccountReport, currency: string): Block {
   return {
     kind: "table",
     columns: [
-      { label: "Channel", align: "left" },
-      { label: "Spend", align: "right" },
+      { label: "Kênh", align: "left" },
+      { label: "Chi tiêu", align: "right" },
       { label: "ROAS", align: "right" },
-      { label: "Conv. Rate", align: "right" },
-      { label: "Conversions", align: "right" },
+      { label: "Tỷ lệ chuyển đổi", align: "right" },
+      { label: "Chuyển đổi", align: "right" },
     ],
     rows: report.channels.map((c) => [
       { text: c.platform === "meta" ? "Meta" : "Google Ads", align: "left" },
@@ -264,14 +263,14 @@ function channelTable(report: AccountReport, currency: string): Block {
 
 const HEALTH = (roas: number): ReportDoc["health"] =>
   roas >= 2.5
-    ? { label: "Healthy", tone: "good", line: `${xroas(roas)} ROAS — returning strongly on spend.` }
+    ? { label: "Healthy", tone: "good", line: `ROAS đạt ${xroas(roas)} — hiệu quả sinh lời rất tốt trên chi phí.` }
     : roas >= 1
-      ? { label: "Watch", tone: "warn", line: `${xroas(roas)} ROAS — profitable but below a 2.5x target.` }
-      : { label: "At risk", tone: "bad", line: `${xroas(roas)} ROAS — spending more than it returns.` };
+      ? { label: "Watch", tone: "warn", line: `ROAS đạt ${xroas(roas)} — có lãi nhưng dưới mục tiêu 2.5x.` }
+      : { label: "At risk", tone: "bad", line: `ROAS đạt ${xroas(roas)} — chi phí quảng cáo đang cao hơn doanh thu.` };
 
 const fmtRange = (since: string, until: string) => {
-  const o: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  return `${new Date(since + "T00:00:00").toLocaleDateString("en-US", o)} – ${new Date(until + "T00:00:00").toLocaleDateString("en-US", o)}`;
+  const o: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric" };
+  return `${new Date(since + "T00:00:00").toLocaleDateString("vi-VN", o)} – ${new Date(until + "T00:00:00").toLocaleDateString("vi-VN", o)}`;
 };
 
 const ratingTone = (r: Rating | null): Tone =>
@@ -296,18 +295,18 @@ function doc(recipe: string, title: string, report: AccountReport, health: Repor
 
 const finish = (analysis: Analysis, sections: Section[], fixes?: Block) => {
   if (analysis.findings.length) {
-    sections.push({ eyebrow: "Key Findings", note: `${analysis.findings.length}`, blocks: [{ kind: "findings", items: analysis.findings }] });
+    sections.push({ eyebrow: "Phát hiện chính", note: `${analysis.findings.length}`, blocks: [{ kind: "findings", items: analysis.findings }] });
   }
   const recs: Block | undefined =
     fixes ?? (analysis.recommendations.length ? { kind: "recommendations", items: analysis.recommendations } : undefined);
   if (recs && recs.kind === "recommendations" && recs.items.length) {
-    sections.push({ eyebrow: fixes ? "Priority Fixes" : "Recommendations", note: `${recs.items.length}`, blocks: [recs] });
+    sections.push({ eyebrow: fixes ? "Hành động ưu tiên khắc phục" : "Khuyến nghị tối ưu", note: `${recs.items.length}`, blocks: [recs] });
   }
 };
 
 // ── Account Audit (scored when audit data is available) ──────────────────────
 
-async function buildAccountAudit(report: AccountReport, apiKey: string | null, audit: AuditData | null): Promise<ReportDoc> {
+async function buildAccountAudit(report: AccountReport, apiKey: AIConfig | string | null, audit: AuditData | null): Promise<ReportDoc> {
   const currency = report.account.currency;
   const scored: ScoredAudit | null = audit ? scoreAudit(report, audit) : null;
 
@@ -323,17 +322,17 @@ async function buildAccountAudit(report: AccountReport, apiKey: string | null, a
   // Health from the audit score when we have one, else the ROAS bands.
   const health: ReportDoc["health"] = scored
     ? scored.score >= 70
-      ? { label: "Healthy", tone: "good", line: `${scored.score}/100 audit score — ${scored.rating.toLowerCase()} across ${scored.categories.filter((c) => c.score !== null).length} categories.` }
+      ? { label: "Khỏe mạnh", tone: "good", line: `Điểm kiểm toán ${scored.score}/100 — xếp loại ${scored.rating} trên ${scored.categories.filter((c) => c.score !== null).length} hạng mục.` }
       : scored.score >= 50
-        ? { label: "Watch", tone: "warn", line: `${scored.score}/100 audit score — start with the worst category below.` }
-        : { label: "At risk", tone: "bad", line: `${scored.score}/100 audit score — structural problems need fixing before scaling.` }
+        ? { label: "Cần theo dõi", tone: "warn", line: `Điểm kiểm toán ${scored.score}/100 — nên bắt đầu khắc phục hạng mục yếu nhất phía dưới.` }
+        : { label: "Rủi ro cao", tone: "bad", line: `Điểm kiểm toán ${scored.score}/100 — tồn tại các vấn đề cấu trúc cần xử lý ngay trước khi tăng ngân sách.` }
     : HEALTH(report.kpis.roas.value);
 
   const sections: Section[] = [];
   if (scored) {
     sections.push({
-      eyebrow: "Audit Score",
-      note: `${scored.categories.filter((c) => c.score !== null).length} categories`,
+      eyebrow: "Điểm đánh giá kiểm toán",
+      note: `${scored.categories.filter((c) => c.score !== null).length} hạng mục`,
       blocks: [{
         kind: "scorecard",
         score: scored.score,
@@ -352,22 +351,22 @@ async function buildAccountAudit(report: AccountReport, apiKey: string | null, a
   }
   sections.push(
     {
-      eyebrow: "Executive Summary",
+      eyebrow: "Tóm tắt quản trị",
       blocks: [
         { kind: "callout", tone: health.tone, text: `${health.label} · ${health.line}` },
         { kind: "prose", text: analysis.summary },
       ],
     },
-    { eyebrow: "Headline Metrics", note: `${report.range.days} days`, blocks: [kpiBlock(report, currency)] },
+    { eyebrow: "Chỉ số trọng yếu", note: `${report.range.days} ngày`, blocks: [kpiBlock(report, currency)] },
     {
-      eyebrow: "Performance Trends",
+      eyebrow: "Xu hướng hiệu suất",
       blocks: [
-        { kind: "chart", chart: "spend-roas", barLabel: "Cost", lineLabel: "ROAS" },
-        { kind: "chart", chart: "conv-rate", barLabel: "Conversions", lineLabel: "Conv. Rate" },
-        { kind: "chart", chart: "clicks-ctr", barLabel: "Clicks", lineLabel: "CTR" },
+        { kind: "chart", chart: "spend-roas", barLabel: "Chi phí", lineLabel: "ROAS" },
+        { kind: "chart", chart: "conv-rate", barLabel: "Chuyển đổi", lineLabel: "Tỷ lệ chuyển đổi" },
+        { kind: "chart", chart: "clicks-ctr", barLabel: "Lượt nhấp", lineLabel: "CTR" },
       ],
     },
-    { eyebrow: "Channel Breakdown", blocks: [channelTable(report, currency)] },
+    { eyebrow: "Phân bổ theo kênh", blocks: [channelTable(report, currency)] },
   );
 
   // Priority fixes come from the deterministic audit engine — dollar amounts are
@@ -388,7 +387,7 @@ async function buildAccountAudit(report: AccountReport, apiKey: string | null, a
 
 // ── Search Terms (Google) ────────────────────────────────────────────────────
 
-async function buildSearchTerms(report: AccountReport, apiKey: string | null, terms: SearchTermRow[]): Promise<ReportDoc> {
+async function buildSearchTerms(report: AccountReport, apiKey: AIConfig | string | null, terms: SearchTermRow[]): Promise<ReportDoc> {
   const currency = report.account.currency;
   const waste = summarizeWaste(terms);
   const wastePct = waste.analyzed > 0 ? (waste.wasted / waste.analyzed) * 100 : 0;
@@ -435,60 +434,60 @@ async function buildSearchTerms(report: AccountReport, apiKey: string | null, te
     { text: t.conversions.toFixed(1), align: "right", tone: t.conversions === 0 ? "bad" : t.revenue > t.spend ? "good" : undefined },
   ];
   const termColumns = [
-    { label: "Search Term", align: "left" as const },
-    { label: "Campaign", align: "left" as const },
-    { label: "Match", align: "left" as const },
-    { label: "Spend", align: "right" as const },
-    { label: "Clicks", align: "right" as const },
-    { label: "Conv", align: "right" as const },
+    { label: "Cụm từ tìm kiếm", align: "left" as const },
+    { label: "Chiến dịch", align: "left" as const },
+    { label: "Đối sánh", align: "left" as const },
+    { label: "Chi phí", align: "right" as const },
+    { label: "Lượt nhấp", align: "right" as const },
+    { label: "Chuyển đổi", align: "right" as const },
   ];
 
   const sections: Section[] = [
     {
-      eyebrow: "Executive Summary",
+      eyebrow: "Tóm tắt quản trị",
       blocks: [
         { kind: "callout", tone: health.tone, text: `${health.label} · ${health.line}` },
         { kind: "prose", text: analysis.summary },
       ],
     },
     {
-      eyebrow: "Waste Overview",
-      note: `top ${terms.length} terms`,
+      eyebrow: "Tổng quan lãng phí",
+      note: `top ${terms.length} cụm từ`,
       blocks: [{
         kind: "kpis",
         items: [
-          { label: "Term Spend", value: money(waste.analyzed, currency) },
-          { label: "Wasted", value: money(waste.wasted, currency) },
-          { label: "Waste Rate", value: pct(wastePct) },
-          { label: "Zero-Conv Terms", value: num(waste.wastedTerms.length) },
-          { label: "Terms Analyzed", value: num(terms.length) },
-          { label: "Range", value: `${report.range.days}d` },
+          { label: "Chi phí từ khóa", value: money(waste.analyzed, currency) },
+          { label: "Lãng phí", value: money(waste.wasted, currency) },
+          { label: "Tỷ lệ lãng phí", value: pct(wastePct) },
+          { label: "Từ khóa 0 chuyển đổi", value: num(waste.wastedTerms.length) },
+          { label: "Từ khóa đã duyệt", value: num(terms.length) },
+          { label: "Khung thời gian", value: `${report.range.days} ngày` },
         ],
       }],
     },
   ];
   if (negatives.length) {
     sections.push({
-      eyebrow: "Suggested Negatives",
-      note: `${negatives.length} terms · ${money(waste.wasted, currency)}`,
+      eyebrow: "Gợi ý từ khóa phủ định",
+      note: `${negatives.length} từ khóa · ${money(waste.wasted, currency)}`,
       blocks: [{ kind: "table", columns: termColumns, rows: negatives.map(termRow) }],
     });
   }
   sections.push({
-    eyebrow: "Top Terms by Cost",
-    note: `${Math.min(20, terms.length)} of ${terms.length}`,
+    eyebrow: "Top từ khóa theo chi phí",
+    note: `${Math.min(20, terms.length)} trên ${terms.length}`,
     blocks: [{ kind: "table", columns: termColumns, rows: terms.slice(0, 20).map(termRow) }],
   });
 
   finish(analysis, sections);
-  return doc("search-terms", "Search Term Waste Audit", report, health, sections, aiResult !== null);
+  return doc("search-terms", "Kiểm toán lãng phí từ khóa tìm kiếm", report, health, sections, aiResult !== null);
 }
 
 // ── Creative Fatigue (Meta) ──────────────────────────────────────────────────
 
 const chg = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(0)}%`);
 
-async function buildCreativeFatigue(report: AccountReport, apiKey: string | null, ads: AdFatigueRow[]): Promise<ReportDoc> {
+async function buildCreativeFatigue(report: AccountReport, apiKey: AIConfig | string | null, ads: AdFatigueRow[]): Promise<ReportDoc> {
   const currency = report.account.currency;
   const flags = flagFatigue(ads);
   const fatigued = flags.filter((f) => f.fatigued);
@@ -531,10 +530,10 @@ async function buildCreativeFatigue(report: AccountReport, apiKey: string | null
         : { label: "Healthy", tone, line: "No ads cross the fatigue thresholds." };
 
   const adColumns = [
-    { label: "Ad", align: "left" as const },
-    { label: "Ad Set", align: "left" as const },
-    { label: "Spend", align: "right" as const },
-    { label: "Freq", align: "right" as const },
+    { label: "Mẫu quảng cáo", align: "left" as const },
+    { label: "Nhóm quảng cáo", align: "left" as const },
+    { label: "Chi phí", align: "right" as const },
+    { label: "Tần suất", align: "right" as const },
     { label: "CTR", align: "right" as const },
     { label: "CTR Δ", align: "right" as const },
     { label: "CPM Δ", align: "right" as const },
@@ -554,50 +553,50 @@ async function buildCreativeFatigue(report: AccountReport, apiKey: string | null
 
   const sections: Section[] = [
     {
-      eyebrow: "Executive Summary",
+      eyebrow: "Tóm tắt quản trị",
       blocks: [
         { kind: "callout", tone: health.tone, text: `${health.label} · ${health.line}` },
         { kind: "prose", text: analysis.summary },
       ],
     },
     {
-      eyebrow: "Fatigue Overview",
-      note: `current vs prior ${halfDays}d`,
+      eyebrow: "Tổng quan bão hòa quảng cáo",
+      note: `kỳ hiện tại vs ${halfDays} ngày trước`,
       blocks: [{
         kind: "kpis",
         items: [
-          { label: "Ads Analyzed", value: num(flags.length) },
-          { label: "Fatigued", value: num(fatigued.length) },
-          { label: "Spend at Risk", value: money(fatiguedSpend, currency) },
-          { label: "Scale-Ready", value: num(winners.length) },
-          { label: "Avg Frequency", value: flags.length ? (flags.reduce((a, f) => a + (f.ad.current.frequency ?? 0), 0) / flags.length).toFixed(1) : "—" },
-          { label: "Window", value: `${halfDays}d vs ${halfDays}d` },
+          { label: "Quảng cáo đã duyệt", value: num(flags.length) },
+          { label: "Đã bão hòa", value: num(fatigued.length) },
+          { label: "Ngân sách rủi ro", value: money(fatiguedSpend, currency) },
+          { label: "Sẵn sàng scale", value: num(winners.length) },
+          { label: "Tần suất TB", value: flags.length ? (flags.reduce((a, f) => a + (f.ad.current.frequency ?? 0), 0) / flags.length).toFixed(1) : "—" },
+          { label: "Chu kỳ so sánh", value: `${halfDays}n vs ${halfDays}n` },
         ],
       }],
     },
   ];
   if (fatigued.length) {
     sections.push({
-      eyebrow: "Fatigued Ads — Pause or Refresh First",
-      note: `${fatigued.length} flagged`,
+      eyebrow: "Quảng cáo đã bão hòa — Ưu tiên tạm dừng hoặc thay mới",
+      note: `${fatigued.length} quảng cáo cảnh báo`,
       blocks: [{ kind: "table", columns: adColumns, rows: fatigued.map(adRow) }],
     });
   }
   if (winners.length) {
     sections.push({
-      eyebrow: "Safe to Scale",
-      note: `${winners.length} winners`,
+      eyebrow: "Quảng cáo hiệu quả — An toàn để tăng ngân sách",
+      note: `${winners.length} quảng cáo chiến thắng`,
       blocks: [{ kind: "table", columns: adColumns, rows: winners.map(adRow) }],
     });
   }
   sections.push({
-    eyebrow: "All Analyzed Ads",
-    note: `${flags.length} by spend`,
+    eyebrow: "Toàn bộ quảng cáo đã phân tích",
+    note: `${flags.length} theo chi phí`,
     blocks: [{ kind: "table", columns: adColumns, rows: flags.slice(0, 25).map(adRow) }],
   });
 
   finish(analysis, sections);
-  return doc("creative-fatigue", "Creative Fatigue", report, health, sections, aiResult !== null);
+  return doc("creative-fatigue", "Báo cáo độ bão hòa mẫu quảng cáo", report, health, sections, aiResult !== null);
 }
 
 // ── Landing Page Analysis (GA4 paid traffic) ─────────────────────────────────
@@ -628,7 +627,7 @@ function diagnosePages(rows: LandingPageRow[]): PageDiag[] {
   });
 }
 
-async function buildLandingPages(report: AccountReport, apiKey: string | null, pages: LandingPagesResult): Promise<ReportDoc> {
+async function buildLandingPages(report: AccountReport, apiKey: AIConfig | string | null, pages: LandingPagesResult): Promise<ReportDoc> {
   const currency = report.account.currency;
   const diags = diagnosePages(pages.rows);
   const totalSessions = pages.rows.reduce((a, r) => a + r.current.sessions, 0);
@@ -677,13 +676,13 @@ async function buildLandingPages(report: AccountReport, apiKey: string | null, p
         : { label: "Healthy", tone, line: "Paid landing pages are converting in line with the prior period." };
 
   const pageColumns = [
-    { label: "Landing Page", align: "left" as const },
-    { label: "Source / Medium", align: "left" as const },
-    { label: "Sessions", align: "right" as const },
-    { label: "Bounce", align: "right" as const },
-    { label: "Conv Rate", align: "right" as const },
-    { label: "Rev / Session", align: "right" as const },
-    { label: "Recoverable", align: "right" as const },
+    { label: "Trang đích", align: "left" as const },
+    { label: "Nguồn / Phương tiện", align: "left" as const },
+    { label: "Phiên truy cập", align: "right" as const },
+    { label: "Tỷ lệ thoát", align: "right" as const },
+    { label: "Tỷ lệ chuyển đổi", align: "right" as const },
+    { label: "Doanh thu / Phiên", align: "right" as const },
+    { label: "Khả năng phục hồi", align: "right" as const },
   ];
   const pp = (v: number | null) => (v === null ? "" : ` (${v >= 0 ? "+" : ""}${v.toFixed(1)}pp)`);
   const maxSessions = Math.max(...pages.rows.map((r) => r.current.sessions), 1);
@@ -699,39 +698,39 @@ async function buildLandingPages(report: AccountReport, apiKey: string | null, p
 
   const sections: Section[] = [
     {
-      eyebrow: "Executive Summary",
+      eyebrow: "Tóm tắt quản trị",
       blocks: [
         { kind: "callout", tone: health.tone, text: `${health.label} · ${health.line}` },
         { kind: "prose", text: analysis.summary },
-        { kind: "prose", text: `Source: Google Analytics property "${pages.propertyName}", paid channel groups only. Load time isn't reported — GA4 doesn't expose page-speed metrics; check PageSpeed Insights separately for slow suspects.` },
+        { kind: "prose", text: `Nguồn dữ liệu: Google Analytics 4 (GA4) - "${pages.propertyName}", chỉ tính lưu lượng từ các kênh trả phí. Thời gian tải trang thực tế: GA4 không lưu trực tiếp chỉ số tốc độ, vui lòng kiểm tra PageSpeed Insights cho các trang nghi ngờ tải chậm.` },
       ],
     },
     {
-      eyebrow: "Funnel Overview",
-      note: `${pages.rows.length} pages · paid traffic`,
+      eyebrow: "Tổng quan phễu trang đích",
+      note: `${pages.rows.length} trang đích trả phí`,
       blocks: [{
         kind: "kpis",
         items: [
-          { label: "Paid Sessions", value: num(totalSessions) },
-          { label: "Conv Rate", value: pct(convRate) },
-          { label: "Bounce Rate", value: pct(wBounce) },
-          { label: "Revenue", value: money(totalRevenue, currency) },
-          { label: "Bounce Spikes", value: num(bounceSpikes.length) },
-          { label: "Recoverable", value: money(recoverable, currency) },
+          { label: "Phiên trả phí", value: num(totalSessions) },
+          { label: "Tỷ lệ chuyển đổi", value: pct(convRate) },
+          { label: "Tỷ lệ thoát", value: pct(wBounce) },
+          { label: "Doanh thu", value: money(totalRevenue, currency) },
+          { label: "Trang thoát tăng vọt", value: num(bounceSpikes.length) },
+          { label: "Doanh thu có thể cứu", value: money(recoverable, currency) },
         ],
       }],
     },
   ];
   if (fixOrder.length) {
     sections.push({
-      eyebrow: "Fix Order — Ranked by Recoverable Revenue",
-      note: `${fixOrder.length} pages`,
+      eyebrow: "Thứ tự tối ưu — Xếp hạng theo doanh thu có thể cứu vãn",
+      note: `${fixOrder.length} trang`,
       blocks: [{ kind: "table", columns: pageColumns, rows: fixOrder.slice(0, 10).map(pageRow) }],
     });
   }
   sections.push({
-    eyebrow: "All Paid Landing Pages",
-    note: `top ${Math.min(15, diags.length)} by sessions`,
+    eyebrow: "Toàn bộ trang đích có trả phí",
+    note: `top ${Math.min(15, diags.length)} theo phiên truy cập`,
     blocks: [{ kind: "table", columns: pageColumns, rows: diags.slice(0, 15).map(pageRow) }],
   });
 
@@ -741,12 +740,12 @@ async function buildLandingPages(report: AccountReport, apiKey: string | null, p
         items: fixOrder.slice(0, 5).map((d, i) => ({
           text: `${d.row.page}: ${d.suggestion}`,
           priority: i === 0 || d.recoverable >= totalRevenue * 0.1 ? ("P0" as const) : ("P1" as const),
-          impact: `${money(d.recoverable, currency)} recoverable`,
+          impact: `${money(d.recoverable, currency)} có thể cứu vãn`,
         })),
       }
     : undefined;
   finish(analysis, sections, fixes);
-  return doc("landing-page", "Landing Page Analysis", report, health, sections, aiResult !== null);
+  return doc("landing-page", "Phân tích trang đích quảng cáo", report, health, sections, aiResult !== null);
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -755,7 +754,7 @@ async function buildLandingPages(report: AccountReport, apiKey: string | null, p
 export async function generateReport(
   recipe: string,
   report: AccountReport,
-  apiKey: string | null,
+  apiKey: AIConfig | string | null,
   data: RecipeData = {},
 ): Promise<ReportDoc> {
   switch (recipe) {

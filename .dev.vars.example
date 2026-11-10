@@ -22,7 +22,10 @@ GOOGLEADS_DEVELOPER_TOKEN=your_developer_token_here
 # Manager (MCC) account ID used as login-customer-id, digits only (no dashes)
 GOOGLEADS_LOGIN_CUSTOMER_ID=1234567890
 
-# ── AI hints (optional) ───────────────────────────────────────────────────────
+# ── AI hints & reports (optional) ─────────────────────────────────────────────
 # When set, the dashboard upgrades heuristic issues to AI-written recommendations
-# via OpenRouter. In production this is injected from the org's BYOK key.
-OPENROUTER_API_KEY=your_openrouter_key_here
+# using Google Gemini API directly (or OpenRouter).
+GEMINI_API_KEY=AIzaSy...
+# GEMINI_MODEL=gemini-2.5-flash
+# OR OpenRouter:
+# OPENROUTER_API_KEY=your_openrouter_key_here

@@ -1,12 +1,49 @@
-// AI-generated hints via OpenRouter. When OPENROUTER_API_KEY is injected (declared
-// in clawnify.json `env`), the dashboard upgrades its heuristic issues to sharp,
-// money-focused recommendations written by a small fast model. Falls back to the
-// deterministic heuristics in metrics.ts whenever the key is absent or the call fails.
+// AI-generated hints and analysis via Google Gemini API or OpenRouter.
+// When GEMINI_API_KEY (recommended) or OPENROUTER_API_KEY is injected, the dashboard
+// upgrades its heuristic issues and reports to sharp, money-focused recommendations
+// written by Gemini. Falls back to deterministic heuristics whenever the key is absent or fails.
 
 import type { Issue, Metrics, Platform } from "./providers/types";
+import { secret } from "@clawnify/connections";
+import type { Bindings } from "./env";
 
-const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "google/gemini-3.1-flash-lite";
+export interface AIConfig {
+  provider: "gemini" | "openrouter";
+  apiKey: string;
+  model?: string;
+}
+
+export function getAiConfig(env: Bindings): AIConfig | null {
+  const gProcess = (globalThis as any).process;
+  const geminiKey =
+    secret("GEMINI_API_KEY", env) ||
+    env.GEMINI_API_KEY ||
+    gProcess?.env?.GEMINI_API_KEY;
+
+  if (geminiKey) {
+    const model =
+      secret("GEMINI_MODEL", env) ||
+      env.GEMINI_MODEL ||
+      gProcess?.env?.GEMINI_MODEL ||
+      "gemini-2.5-flash";
+    return { provider: "gemini", apiKey: geminiKey, model };
+  }
+
+  const openrouterKey =
+    secret("OPENROUTER_API_KEY", env) ||
+    env.OPENROUTER_API_KEY ||
+    gProcess?.env?.OPENROUTER_API_KEY;
+
+  if (openrouterKey) {
+    return {
+      provider: "openrouter",
+      apiKey: openrouterKey,
+      model: "google/gemini-3.1-flash-lite",
+    };
+  }
+
+  return null;
+}
 
 export interface HintContext {
   accountName: string;
@@ -42,36 +79,101 @@ Be decisive and specific — no hedging, no theory. Respond ONLY with JSON:
 {"issues":[{"title":"short headline","detail":"what's wrong and why it hurts, with the numbers","action":"the exact fix to apply","severity":"high|medium|low"}]}
 If the account looks healthy, return fewer issues (even an empty array).`;
 
-export async function aiHints(apiKey: string, ctx: HintContext): Promise<Issue[] | null> {
+export function parseJsonSafe<T = any>(raw: string): T | null {
   try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.3,
-        max_tokens: 700,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: snapshot(ctx) },
-        ],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) return null;
-    const parsed = JSON.parse(content) as { issues?: any[] };
-    const raw = Array.isArray(parsed.issues) ? parsed.issues : [];
-    return raw.slice(0, 3).map((it, i) => ({
-      id: `ai-${i}`,
-      title: String(it.title ?? "Issue"),
-      detail: String(it.detail ?? ""),
-      action: String(it.action ?? ""),
-      severity: it.severity === "high" || it.severity === "low" ? it.severity : "medium",
-    }));
+    const clean = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    return JSON.parse(clean);
   } catch {
     return null;
   }
+}
+
+export async function callAI(
+  configOrKey: AIConfig | string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens = 1000,
+): Promise<string | null> {
+  const config: AIConfig =
+    typeof configOrKey === "string"
+      ? configOrKey.startsWith("AIza")
+        ? { provider: "gemini", apiKey: configOrKey, model: "gemini-2.5-flash" }
+        : { provider: "openrouter", apiKey: configOrKey, model: "google/gemini-3.1-flash-lite" }
+      : configOrKey;
+
+  try {
+    if (config.provider === "gemini") {
+      const model = config.model || "gemini-2.5-flash";
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemPrompt }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: userPrompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: maxTokens,
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+      if (!res.ok) {
+        console.error("Gemini API error:", res.status, await res.text().catch(() => ""));
+        return null;
+      }
+      const data = (await res.json()) as any;
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+    } else {
+      const model = config.model || "google/gemini-3.1-flash-lite";
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          temperature: 0.3,
+          max_tokens: maxTokens,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        console.error("OpenRouter API error:", res.status, await res.text().catch(() => ""));
+        return null;
+      }
+      const data = (await res.json()) as any;
+      return data?.choices?.[0]?.message?.content ?? null;
+    }
+  } catch (err) {
+    console.error("AI call failed:", err);
+    return null;
+  }
+}
+
+export async function aiHints(
+  configOrKey: AIConfig | string,
+  ctx: HintContext,
+): Promise<Issue[] | null> {
+  const content = await callAI(configOrKey, SYSTEM, snapshot(ctx), 700);
+  if (!content) return null;
+
+  const parsed = parseJsonSafe<{ issues?: any[] }>(content);
+  const raw = Array.isArray(parsed?.issues) ? parsed.issues : [];
+  return raw.slice(0, 3).map((it, i) => ({
+    id: `ai-${i}`,
+    title: String(it.title ?? "Issue"),
+    detail: String(it.detail ?? ""),
+    action: String(it.action ?? ""),
+    severity: it.severity === "high" || it.severity === "low" ? it.severity : "medium",
+  }));
 }
