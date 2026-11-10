@@ -36,7 +36,7 @@ function rowMetrics(row: GoogleAdsRow): Metrics {
 const customerName = (row?: GoogleAdsRow, fallbackId = "") =>
   pick(row?.customer ?? {}, "descriptiveName", "descriptive_name") || pretty(fallbackId);
 const customerCurrency = (row?: GoogleAdsRow) =>
-  pick(row?.customer ?? {}, "currencyCode", "currency_code") || "USD";
+  pick(row?.customer ?? {}, "currencyCode", "currency_code") || "VND";
 
 const QUERIES = {
   customer: "SELECT customer.id, customer.descriptive_name, customer.currency_code FROM customer",

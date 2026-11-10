@@ -55,7 +55,7 @@ export async function warehouseAccounts(): Promise<AccountRef[]> {
     id: r.id,
     name: r.name || r.id,
     platform: r.platform as Platform,
-    currency: r.currency || "USD",
+    currency: r.currency || "VND",
   }));
 }
 

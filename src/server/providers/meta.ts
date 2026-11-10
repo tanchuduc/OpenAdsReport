@@ -108,7 +108,7 @@ export class MetaProvider implements AdProvider {
     const accounts = await this.client.adAccounts("name,currency,account_status");
     return accounts
       .filter((a: any) => a.account_status === 1)
-      .map((a: any) => ({ id: a.id, name: a.name ?? a.id, platform: "meta" as const, currency: a.currency ?? "USD" }));
+      .map((a: any) => ({ id: a.id, name: a.name ?? a.id, platform: "meta" as const, currency: a.currency ?? "VND" }));
   }
 
   async accountSummaries(range: DateRange): Promise<AccountSummary[]> {
@@ -135,7 +135,7 @@ export class MetaProvider implements AdProvider {
 
     const curM = first(cur);
     const prevM = prev[0] ? rowMetrics(prev[0]) : null;
-    const account: AccountRef = { id, name: obj.name ?? id, platform: "meta", currency: obj.currency ?? "USD" };
+    const account: AccountRef = { id, name: obj.name ?? id, platform: "meta", currency: obj.currency ?? "VND" };
 
     return {
       account,
