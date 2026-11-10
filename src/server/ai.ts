@@ -25,7 +25,7 @@ export function getAiConfig(env: Bindings): AIConfig | null {
       secret("GEMINI_MODEL", env) ||
       env.GEMINI_MODEL ||
       gProcess?.env?.GEMINI_MODEL ||
-      "gemini-2.5-flash";
+      "gemini-3.5-flash-lite";
     return { provider: "gemini", apiKey: geminiKey, model };
   }
 
@@ -96,41 +96,52 @@ export async function callAI(
 ): Promise<string | null> {
   const config: AIConfig =
     typeof configOrKey === "string"
-      ? configOrKey.startsWith("AIza")
-        ? { provider: "gemini", apiKey: configOrKey, model: "gemini-2.5-flash" }
+      ? configOrKey.startsWith("AIza") || configOrKey.startsWith("AQ.") || !configOrKey.startsWith("sk-")
+        ? { provider: "gemini", apiKey: configOrKey, model: "gemini-3.5-flash-lite" }
         : { provider: "openrouter", apiKey: configOrKey, model: "google/gemini-3.1-flash-lite" }
       : configOrKey;
 
   try {
     if (config.provider === "gemini") {
-      const model = config.model || "gemini-2.5-flash";
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: systemPrompt }],
-          },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: userPrompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: maxTokens,
-            responseMimeType: "application/json",
-          },
-        }),
-      });
-      if (!res.ok) {
-        console.error("Gemini API error:", res.status, await res.text().catch(() => ""));
-        return null;
+      const primaryModel = config.model || "gemini-3.5-flash-lite";
+      const fallbackModels = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"];
+      const modelsToTry = [primaryModel, ...fallbackModels.filter((m) => m !== primaryModel)];
+
+      for (const model of modelsToTry) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              system_instruction: {
+                parts: [{ text: systemPrompt }],
+              },
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: userPrompt }],
+                },
+              ],
+              generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: maxTokens,
+                responseMimeType: "application/json",
+              },
+            }),
+          });
+          if (!res.ok) {
+            console.warn(`Gemini (${model}) returned status ${res.status}, trying next fallback...`);
+            continue;
+          }
+          const data = (await res.json()) as any;
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return text;
+        } catch (mErr) {
+          console.warn(`Gemini (${model}) request failed, trying next fallback...`, mErr);
+        }
       }
-      const data = (await res.json()) as any;
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+      return null;
     } else {
       const model = config.model || "google/gemini-3.1-flash-lite";
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
