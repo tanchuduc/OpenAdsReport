@@ -1,14 +1,8 @@
-// Meta Ads provider. All data comes through the connections SDK's semantic
-// methods — connect("metaads").adAccounts() / insights() / object() — which route
-// through whatever maintainer holds the credential (Composio execute today). The
-// app carries NO Graph API URLs, version, or token plumbing: the broker is hidden
-// and a future maintainer swap changes the descriptor, not this file.
-
 import type {
   AccountRef, AccountReport, AccountSummary, AdFatigueRow, AdProvider, AdWindowMetrics,
   DailyPoint, DateRange, MetaAudit, Metrics,
 } from "./types";
-import { connect, isConnected, type ConnectionsEnv, type MetaAdsClient, type MetaInsightRow } from "@clawnify/connections";
+import type { ConnectionsEnv } from "@clawnify/connections";
 import { buildKpis, cpa as cpaOf, ctr as ctrOf, deriveIssues, emptyMetrics, metrics } from "../metrics";
 
 type MetaAction = { action_type: string; value: string };
@@ -19,7 +13,7 @@ function pickAction(arr: MetaAction[] | undefined, type: string): number {
   return +((omni ?? direct)?.value ?? 0);
 }
 
-function rowMetrics(row: MetaInsightRow): Metrics {
+function rowMetrics(row: any): Metrics {
   return metrics({
     spend: +(row.spend ?? 0),
     revenue: pickAction(row.action_values, "purchase"),
@@ -29,10 +23,9 @@ function rowMetrics(row: MetaInsightRow): Metrics {
   });
 }
 
-const first = (rows: MetaInsightRow[]): Metrics => (rows[0] ? rowMetrics(rows[0]) : emptyMetrics());
+const first = (rows: any[]): Metrics => (rows[0] ? rowMetrics(rows[0]) : emptyMetrics());
 
-/** One `time_increment=1` insights row as a chart/warehouse point. */
-function toDailyPoint(row: MetaInsightRow): DailyPoint {
+function toDailyPoint(row: any): DailyPoint {
   const m = rowMetrics(row);
   return {
     date: row.date_start!,
@@ -41,15 +34,12 @@ function toDailyPoint(row: MetaInsightRow): DailyPoint {
   };
 }
 
-// Ad-level rows carry extra Graph fields the SDK type doesn't name.
-type AdRow = MetaInsightRow & Record<string, any>;
-
 const AD_FIELDS = [
   "ad_id", "ad_name", "adset_name", "campaign_name",
   "spend", "impressions", "clicks", "frequency", "cpm", "actions", "action_values",
 ];
 
-function adWindow(row: AdRow): AdWindowMetrics {
+function adWindow(row: any): AdWindowMetrics {
   const spend = +(row.spend ?? 0);
   const clicks = +(row.clicks ?? 0);
   const impressions = +(row.impressions ?? 0);
@@ -66,24 +56,59 @@ function adWindow(row: AdRow): AdWindowMetrics {
   };
 }
 
+function createDirectMetaClient(token: string) {
+  const base = "https://graph.facebook.com/v21.0";
+  return {
+    async adAccounts(fields = "id,name,currency,account_status") {
+      const res = await fetch(`${base}/me/adaccounts?fields=${fields}&limit=100&access_token=${encodeURIComponent(token)}`);
+      if (!res.ok) throw new Error(`Meta API error: ${await res.text()}`);
+      const data: any = await res.json();
+      return data?.data ?? [];
+    },
+    async insights(objectId: string, opts: any = {}) {
+      const id = objectId.startsWith("act_") ? objectId : `act_${objectId}`;
+      const params = new URLSearchParams();
+      params.set("access_token", token);
+      params.set("level", opts.level ?? "account");
+      const f = opts.fields ?? ["spend", "impressions", "clicks", "actions", "action_values"];
+      params.set("fields", Array.isArray(f) ? f.join(",") : f);
+      if (opts.since && opts.until) {
+        params.set("time_range", JSON.stringify({ since: opts.since, until: opts.until }));
+      } else {
+        params.set("date_preset", opts.datePreset ?? "last_30d");
+      }
+      if (opts.timeIncrement != null) params.set("time_increment", String(opts.timeIncrement));
+      const res = await fetch(`${base}/${id}/insights?${params.toString()}`);
+      if (!res.ok) throw new Error(`Meta Insights error: ${await res.text()}`);
+      const data: any = await res.json();
+      return data?.data ?? [];
+    },
+    async object(objectId: string, fields: string[] = ["name", "currency"]) {
+      const id = objectId.startsWith("act_") ? objectId : `act_${objectId}`;
+      const res = await fetch(`${base}/${id}?fields=${fields.join(",")}&access_token=${encodeURIComponent(token)}`);
+      if (!res.ok) throw new Error(`Meta Object error: ${await res.text()}`);
+      return await res.json();
+    }
+  };
+}
+
 export class MetaProvider implements AdProvider {
   readonly id = "meta" as const;
-  constructor(private client: MetaAdsClient) {}
+  constructor(private client: any) {}
 
   static async create(env: ConnectionsEnv): Promise<MetaProvider | null> {
-    if (!(await isConnected("metaads", env))) return null;
-    return new MetaProvider(connect("metaads", env));
+    const token = (env as any).METAADS_BEARER_TOKEN || (env as any).METAADS_ACCESS_TOKEN;
+    if (!token) return null;
+    return new MetaProvider(createDirectMetaClient(token));
   }
 
-  isConnected() {
-    return true;
-  }
+  isConnected() { return true; }
 
   async listAccounts(): Promise<AccountRef[]> {
     const accounts = await this.client.adAccounts("name,currency,account_status");
     return accounts
-      .filter((a) => a.account_status === 1)
-      .map((a) => ({ id: a.id, name: a.name ?? a.id, platform: "meta" as const, currency: a.currency ?? "USD" }));
+      .filter((a: any) => a.account_status === 1)
+      .map((a: any) => ({ id: a.id, name: a.name ?? a.id, platform: "meta" as const, currency: a.currency ?? "USD" }));
   }
 
   async accountSummaries(range: DateRange): Promise<AccountSummary[]> {
@@ -105,7 +130,6 @@ export class MetaProvider implements AdProvider {
       this.client.object(id, ["name", "currency"]),
       this.client.insights(id, { level: "account", since: range.since, until: range.until }),
       this.client.insights(id, { level: "account", since: range.prevSince, until: range.prevUntil }),
-      // Per-day series for the charts — same call the sync makes.
       this.dailySeries(id, range.since, range.until),
     ]);
 
@@ -128,19 +152,11 @@ export class MetaProvider implements AdProvider {
   async dailySeries(accountId: string, since: string, until: string): Promise<DailyPoint[]> {
     const id = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
     const rows = await this.client.insights(id, { level: "account", since, until, timeIncrement: 1 });
-    return rows.filter((row) => row.date_start).map(toDailyPoint);
+    return rows.filter((row: any) => row.date_start).map(toDailyPoint);
   }
 
-  /**
-   * Per-ad metrics for the current vs prior half of the range (a 14-day range
-   * compares week over week). Rows join on ad_id; ads with no prior-window
-   * delivery keep prev: null.
-   * Ceiling: the insights action returns one Graph page (~25 ads per window) —
-   * enough for most accounts; large accounts see their top delivering ads.
-   */
   async adFatigue(accountId: string, range: DateRange): Promise<AdFatigueRow[]> {
     const id = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
-    // Split [since..until] into two equal halves.
     const start = new Date(range.since + "T00:00:00Z");
     const end = new Date(range.until + "T00:00:00Z");
     const mid = new Date(start.getTime() + Math.floor((end.getTime() - start.getTime()) / 2));
@@ -149,14 +165,14 @@ export class MetaProvider implements AdProvider {
     const iso = (d: Date) => d.toISOString().split("T")[0];
 
     const [curRows, prevRows] = await Promise.all([
-      this.client.insights(id, { level: "ad", fields: AD_FIELDS, since: iso(midNext), until: range.until }) as Promise<AdRow[]>,
-      this.client.insights(id, { level: "ad", fields: AD_FIELDS, since: range.since, until: iso(mid) }) as Promise<AdRow[]>,
+      this.client.insights(id, { level: "ad", fields: AD_FIELDS, since: iso(midNext), until: range.until }),
+      this.client.insights(id, { level: "ad", fields: AD_FIELDS, since: range.since, until: iso(mid) }),
     ]);
 
-    const prevById = new Map(prevRows.filter((r) => r.ad_id).map((r) => [String(r.ad_id), r]));
+    const prevById = new Map(prevRows.filter((r: any) => r.ad_id).map((r: any) => [String(r.ad_id), r]));
     return curRows
-      .filter((r) => r.ad_id)
-      .map((r) => {
+      .filter((r: any) => r.ad_id)
+      .map((r: any) => {
         const prev = prevById.get(String(r.ad_id));
         return {
           adId: String(r.ad_id),
@@ -167,7 +183,7 @@ export class MetaProvider implements AdProvider {
           prev: prev ? adWindow(prev) : null,
         };
       })
-      .sort((a, b) => b.current.spend - a.current.spend);
+      .sort((a: any, b: any) => b.current.spend - a.current.spend);
   }
 
   async auditData(accountId: string, range: DateRange): Promise<MetaAudit> {
