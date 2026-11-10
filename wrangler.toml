@@ -1,4 +1,4 @@
-name = "open-ads-report"
+name = "openadsreport"
 main = "src/server/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
@@ -11,4 +11,4 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "openadsreport-db"
-database_id = "ced50cd5-cabb-4c21-823c-fe0b4080f18b"
+database_id = "0ed50cd5-cabb-4c21-823c-fe0b4080f18b"
